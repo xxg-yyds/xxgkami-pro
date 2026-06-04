@@ -1,24 +1,36 @@
 {
   "version": "1.0.6",
-  "buildDate": "2026-05-06",
-  "repoUrl": "https://github.com/xiaoxiaoguai-yyds/xxgkami-pro",
+  "buildDate": "2026-06-04",
+  "repoUrl": "https://github.com/xxg-yyds/xxgkami-pro",
+  "releaseDownloads": {
+    "gitee": {
+      "distZip": "https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro/releases/download/{version}/dist.zip",
+      "backendJar": "https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro/releases/download/{version}/backend-0.0.1-SNAPSHOT.jar"
+    },
+    "github": {
+      "distZip": "https://github.com/xxg-yyds/xxgkami-pro/releases/download/{version}/dist.zip",
+      "backendJar": "https://github.com/xxg-yyds/xxgkami-pro/releases/download/{version}/backend-0.0.1-SNAPSHOT.jar"
+    }
+  },
   "changelog": [
-    "1. 新增 API 密钥管理页「代码实例」入口（位于「接口文档」左侧），便于快速查阅核销接口调用方式",
-    "2. 新增核销接口多语言示例弹窗：覆盖 Shell（cURL/Wget/HTTPie 等）、PowerShell、Node.js、浏览器/JavaScript、HTML、Vue 3、Python、PHP、Go、Java、C#、Ruby、Kotlin、Dart、Rust、Swift 等常见语言与工具",
-    "3. 示例数据独立维护于 apiUseCardCodeExamples.js，弹窗内支持左侧切换语言、一键复制源码",
-    "4. 集成 highlight.js（GitHub Dark 主题），各语言代码块支持语法高亮；展示当前环境 API 根路径参考，便于替换示例中的 BASE_URL",
-    "5. 卡密管理：支持按设备码/机器码查找对应卡密；导出支持筛选「未使用」「已使用」",
-    "6. 时间卡规则：新增「叠加 / 单张」模式——单张为现行逻辑（以激活时刻起算到期）；叠加模式下同一设备续充时间卡时，将新卡时长累加到当前生效授权的到期时间（原到期时间 + 新卡含时），实现无缝续期；参与叠加的卡密标记为已使用（叠加）或已合并；不同面额仅叠加时长数值、不改写套餐类型；修正原同机多张时间卡「后者覆盖前者剩余时长、每次均以当前时间重新起算」及多记录并行不合理倒计时等问题",
-    "7. 一机一码增强：卡密在首台设备绑定且为已使用后，其它机器码无法再通过该卡核销，补全跨机校验与防重复滥用",
-    "8. API 密钥能力：支持按密钥配置「同一机器码对指定卡密类型仅可成功核销一次」（例如每台机仅一次 1 天体验卡）",
-    "9. 用户首页：支持用户自行解绑已绑定的机器码（无需仅依赖管理员后台）",
-    "10. 管理后台：顶部导航栏布局与交互重做，提升入口清晰度与操作效率",
-    "11. 修正部分示例片段（如 Go JSON 请求体、C# HttpClient 调用等），保证可对照使用",
-    "12. 修复次数卡剩余最后一次无法正常扣减、次数无法归零的问题",
-    "13. 修复已激活时间卡在后台修改时长不生效的问题"
+    "1. 新增在线更新：系统信息页可一键更新；自动探测后端 JAR 与前端 dist 路径，支持手动修改确认后下载 Release 制品并替换，完成后自动重启后端",
+    "2. version.json 新增 releaseDownloads（Gitee/GitHub 各含 dist.zip 与 backend JAR 下载地址，支持 {version} 占位符）",
+    "3. 检查更新优化：并行 ping gitee.com 与 github.com，优先使用先连通的通道拉取 version.json，并提示所用通道",
+    "4. 首次安装向导完善：检测 kami 库是否存在 admins 表；无 admins 视为未初始化业务库，自动执行全新导入（跳过「覆盖/智能更新」策略页）",
+    "5. 首次安装向导：选 MySQL 5.6 时由 kami.sql 自动转译为 5.6 兼容脚本并显示转译进度，无需单独维护 kami_mysql56.sql",
+    "6. 种子 SQL 内嵌 JAR：打包时纳入 databaes/kami.sql，部署仅上传 JAR 亦可安装；支持解压到 data/.xxgkami-seed 及自定义 seed-sql-override",
+    "7. 安装/升级标记：以 data/.xxgkami-setup.complete 与 admins 表共同判定业务库就绪；未完成前跳过业务 JDBC 探测与 ApiKey 等初始化，避免空库报错",
+    "8. Spring Session：使用 spring_session 表名，启动时初始化会话表；修复 SPRING_SESSION 相关启动与清理错误",
+    "9. 新版升级检测：业务库就绪后按 data/.xxgkami-version.json 与远程版本比对，支持智能合并更新与版本升级向导",
+    "10. 引导页与加载页 UI：logo 蒙版渐隐背景；系统初始化向导支持版本升级模式与 5.6 SQL 转译进度展示",
+    "11. 卡密管理列表：缩短卡密列显示宽度；新增 IP 列（有 ip_address 显示 IP，否则显示「未绑定」）",
+    "12. 修复 MySQL 5.6 转译时 replaceAll「${1}」触发 Java 命名捕获组告警，改为安全替换逻辑",
+    "13. 修复宝塔等仅部署 JAR 环境提示「未找到 databaes/kami.sql」导致安装卡在 0% 的问题",
+    "14. 修复首次启动 Spring Session 等自动建表导致向导误报「库已存在需覆盖/合并」的问题",
+    "15. 远程 version.json Gitee 源地址调整为 xiaoxiaoguai-yyds/xxgkami-pro，与 Release 下载仓库一致"
   ],
   "updateScripts": {
-    "cn": "curl -O https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro/raw/master/install.sh && chmod +x install.sh && sudo ./install.sh",
-    "global": "curl -O https://raw.githubusercontent.com/xiaoxiaoguai-yyds/xxgkami-pro/refs/heads/master/install.sh && chmod +x install.sh && sudo ./install.sh"
+    "cn": "curl -O https://gitee.com/xxg-yyds/xxgkami-pro/raw/master/install.sh && chmod +x install.sh && sudo ./install.sh",
+    "global": "curl -O https://raw.githubusercontent.com/xxg-yyds/xxgkami-pro/refs/heads/master/install.sh && chmod +x install.sh && sudo ./install.sh"
   }
 }
