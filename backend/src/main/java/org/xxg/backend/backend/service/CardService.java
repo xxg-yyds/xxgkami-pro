@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.xxg.backend.backend.mapper.ApiKeyMapper;
 import org.xxg.backend.backend.mapper.ApiKeyMachineSpecRedemptionMapper;
 import org.xxg.backend.backend.mapper.CardMapper;
+import org.xxg.backend.backend.mapper.SimpleCardMapper;
 import org.xxg.backend.backend.mapper.OrderMapper;
 import org.xxg.backend.backend.mapper.UserMapper;
 import org.xxg.backend.backend.entity.ApiKey;
@@ -40,6 +41,8 @@ public class CardService {
 
     @Autowired
     private CardMapper cardMapper;
+    @Autowired
+    private SimpleCardMapper simpleCardMapper;
     @Autowired
     private OrderMapper orderMapper;
     @Autowired
@@ -93,9 +96,21 @@ public class CardService {
 
         Card card = cardMapper.findByCardKey(cardKey);
         if (card == null) {
-            throw new RuntimeException("卡密不存在");
+            card = simpleCardMapper.findByCardKey(cardKey);
+            if (card == null) {
+                throw new RuntimeException("卡密不存在");
+            }
+        } else if (card.getStorageType() == null) {
+            card.setStorageType("encrypted");
         }
 
+        return redeemCard(card, deviceId, ipAddress, apiKeyId, machineCode);
+    }
+
+    /**
+     * 核销普通/简单卡密（不含高级 $ 格式）
+     */
+    private Card redeemCard(Card card, String deviceId, String ipAddress, Long apiKeyId, String machineCode) {
         // Verify API Key binding
         if (card.getApiKeyId() != null) {
             if (apiKeyId == null || !card.getApiKeyId().equals(apiKeyId)) {
@@ -132,23 +147,23 @@ public class CardService {
                     throw new RuntimeException("该卡密不允许重复验证，验证次数已达上限(1次)");
                 }
                 if (needsMachinePersist) {
-                    cardMapper.update(card);
+                    persistCard(card);
                 }
             } else {
                 Card anchor = null;
                 if (Boolean.TRUE.equals(card.getStackTimeIfSameMachine())
                         && machineCode != null && !machineCode.isEmpty()
                         && card.getDuration() != null && card.getDuration() > 0) {
-                    anchor = pickBestStackAnchor(machineCode, card.getApiKeyId(), card.getId());
+                    anchor = pickBestStackAnchor(machineCode, card.getApiKeyId(), card.getId(), isSimpleStorage(card));
                 }
 
                 if (anchor != null) {
                     extendAnchorSubscription(anchor, card.getDuration());
-                    cardMapper.markCardMergedInto(card.getId(), anchor.getId(), now, machineCode, deviceId, ipAddress);
+                    markCardMergedInto(card.getId(), anchor.getId(), now, machineCode, deviceId, ipAddress, isSimpleStorage(card));
                     recordMachineSpecRedemptionIfNeeded(apiKeyEntity, machineCode, card);
-                    notifyCardConsumed(apiKeyEntity, anchor, ipAddress, cardKey, now);
+                    notifyCardConsumed(apiKeyEntity, anchor, ipAddress, card.getCardKey(), now);
 
-                    Card reloaded = cardMapper.findById(anchor.getId());
+                    Card reloaded = reloadCardById(anchor.getId(), isSimpleStorage(anchor));
                     enrichAdvancedTimeCardExpireFromStatus(Collections.singletonList(reloaded));
                     return reloaded;
                 }
@@ -188,11 +203,11 @@ public class CardService {
         }
 
         if (isUpdated) {
-            cardMapper.update(card);
+            persistCard(card);
             recordMachineSpecRedemptionIfNeeded(apiKeyEntity, machineCode, card);
         }
 
-        notifyCardConsumed(apiKeyEntity, card, ipAddress, cardKey, now);
+        notifyCardConsumed(apiKeyEntity, card, ipAddress, card.getCardKey(), now);
 
         return card;
     }
@@ -292,9 +307,11 @@ public class CardService {
         return null;
     }
 
-    private Card pickBestStackAnchor(String machineCode, Long apiKeyId, Long excludeCardId) {
+    private Card pickBestStackAnchor(String machineCode, Long apiKeyId, Long excludeCardId, boolean simpleStorage) {
         Long exId = excludeCardId != null ? excludeCardId : -1L;
-        List<Card> candidates = cardMapper.listStackAnchorCandidates(machineCode, exId);
+        List<Card> candidates = simpleStorage
+                ? simpleCardMapper.listStackAnchorCandidates(machineCode, exId)
+                : cardMapper.listStackAnchorCandidates(machineCode, exId);
         LocalDateTime now = LocalDateTime.now();
         Card best = null;
         LocalDateTime bestExp = null;
@@ -324,7 +341,12 @@ public class CardService {
             base = now;
         }
         LocalDateTime newExp = base.plusDays(addDays);
-        cardMapper.updateExpireTimeById(anchor.getId(), newExp);
+        if (isSimpleStorage(anchor)) {
+            simpleCardMapper.updateExpireTimeById(anchor.getId(), newExp);
+            anchor.setExpireTime(newExp);
+        } else {
+            cardMapper.updateExpireTimeById(anchor.getId(), newExp);
+        }
         if (anchor.getEncryptedKey() != null && anchor.getEncryptionType() != null
                 && "advanced".equalsIgnoreCase(anchor.getEncryptionType())) {
             cardStatusMapper.activateExpireTime(anchor.getEncryptedKey(), newExp);
@@ -583,27 +605,91 @@ public class CardService {
      * 获取指定 API Key 下的卡密
      */
     public List<Card> getCardsByApiKey(Long apiKeyId) {
-        List<Card> list = cardMapper.findByApiKeyId(apiKeyId);
+        List<Card> list = new ArrayList<>(cardMapper.findByApiKeyId(apiKeyId));
+        list.addAll(simpleCardMapper.findByApiKeyId(apiKeyId));
+        list.sort((a, b) -> {
+            if (a.getCreateTime() == null && b.getCreateTime() == null) return 0;
+            if (a.getCreateTime() == null) return 1;
+            if (b.getCreateTime() == null) return -1;
+            return b.getCreateTime().compareTo(a.getCreateTime());
+        });
         enrichAdvancedTimeCardExpireFromStatus(list);
         return list;
     }
 
-    @Transactional
-    public void deleteCard(Long id) {
-        // Find card to get encrypted_key (card_hash)
+    /** 物理删除单行卡密及 card_status / card_cipher 联动数据 */
+    private void deleteCardCascade(Long id, String storageType) {
+        if ("simple".equalsIgnoreCase(storageType)) {
+            if (simpleCardMapper.findById(id) != null) {
+                simpleCardMapper.delete(id);
+            }
+            return;
+        }
         Card card = cardMapper.findById(id);
         if (card != null && card.getEncryptedKey() != null) {
             String cardHash = card.getEncryptedKey();
-            // Delete from related tables
             cardStatusMapper.deleteByCardHash(cardHash);
             cardCipherMapper.deleteByCardHash(cardHash);
         }
         cardMapper.delete(id);
     }
 
+    @Transactional
+    public void deleteCard(Long id) {
+        deleteCard(id, "encrypted");
+    }
+
+    @Transactional
+    public void deleteCard(Long id, String storageType) {
+        deleteCardCascade(id, storageType);
+    }
+
+    /**
+     * 批量删除（一条事务），含已使用、已过期等任意状态。
+     *
+     * @return 实际删除条数（无效的 id 跳过）
+     */
+    @Transactional
+    public int deleteCards(List<Long> ids) {
+        return deleteCards(ids, null);
+    }
+
+    @Transactional
+    public int deleteCards(List<Long> ids, List<String> storageTypes) {
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        int n = 0;
+        for (int i = 0; i < ids.size(); i++) {
+            Long id = ids.get(i);
+            if (id == null) {
+                continue;
+            }
+            String st = (storageTypes != null && i < storageTypes.size() && storageTypes.get(i) != null)
+                    ? storageTypes.get(i) : "encrypted";
+            if ("simple".equalsIgnoreCase(st)) {
+                if (simpleCardMapper.findById(id) != null) {
+                    deleteCardCascade(id, "simple");
+                    n++;
+                }
+            } else if (cardMapper.findById(id) != null) {
+                deleteCardCascade(id, "encrypted");
+                n++;
+            }
+        }
+        return n;
+    }
+
     public List<Card> getAllCards() {
-        List<Card> list = cardMapper.findAll();
+        List<Card> list = new ArrayList<>(cardMapper.findAll());
         enrichAdvancedTimeCardExpireFromStatus(list);
+        list.addAll(simpleCardMapper.findAll());
+        list.sort((a, b) -> {
+            if (a.getCreateTime() == null && b.getCreateTime() == null) return 0;
+            if (a.getCreateTime() == null) return 1;
+            if (b.getCreateTime() == null) return -1;
+            return b.getCreateTime().compareTo(a.getCreateTime());
+        });
         return list;
     }
 
@@ -649,11 +735,79 @@ public class CardService {
      * 已激活时间卡：修改 duration 会同步重算 expire_time；高级卡密额外写回 card_status。
      * 已使用次数卡（高级）：修改总次数/剩余次数会同步 card_status，否则核销仍读旧值。
      */
+    /**
+     * 批量创建简单（未加密）卡密
+     */
+    @Transactional
+    public List<Card> createSimpleCards(int count, String cardType, int duration, int totalCount,
+                                       String verifyMethod, int allowReverify,
+                                       String creatorType, Long creatorId, String creatorName,
+                                       Long apiKeyId, boolean stackTimeIfSameMachine, boolean allowSelfUnbind,
+                                       int keyLength, List<String> manualKeys) {
+        if (keyLength < 4 || keyLength > 128) {
+            throw new RuntimeException("卡密长度须在 4～128 之间");
+        }
+        List<String> keysToCreate = new ArrayList<>();
+        if (manualKeys != null && !manualKeys.isEmpty()) {
+            for (String k : manualKeys) {
+                if (k == null || k.isBlank()) {
+                    continue;
+                }
+                keysToCreate.add(k.trim());
+            }
+            if (keysToCreate.size() != count) {
+                throw new RuntimeException("手动卡密条数须与生成数量一致");
+            }
+        } else {
+            for (int i = 0; i < count; i++) {
+                keysToCreate.add(generateSimpleCardKey(keyLength));
+            }
+        }
+
+        List<Card> cards = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+        for (String key : keysToCreate) {
+            if (key.length() > 128) {
+                throw new RuntimeException("卡密过长（最多 128 字符）: " + key);
+            }
+            assertCardKeyGloballyUnique(key);
+
+            Card card = new Card();
+            card.setCardKey(key);
+            card.setCardType(cardType);
+            card.setDuration(duration);
+            card.setTotalCount(totalCount);
+            card.setRemainingCount(totalCount);
+            card.setStatus(0);
+            card.setVerifyMethod(verifyMethod != null ? verifyMethod : "web");
+            card.setEncryptionType("simple");
+            card.setStorageType("simple");
+            card.setAllowReverify(allowReverify);
+            card.setCreateTime(now);
+            card.setCreatorType(creatorType);
+            card.setCreatorId(creatorId);
+            card.setCreatorName(creatorName);
+            card.setApiKeyId(apiKeyId);
+            card.setStackTimeIfSameMachine(stackTimeIfSameMachine && "time".equals(cardType));
+            card.setAllowSelfUnbind(allowSelfUnbind);
+            cards.add(card);
+        }
+        simpleCardMapper.batchInsert(cards);
+        return cards;
+    }
+
     @Transactional
     public void adminUpdateCard(Long id, Map<String, Object> body) {
-        Card card = cardMapper.findById(id);
+        String storageType = body != null && body.get("storage_type") != null
+                ? body.get("storage_type").toString() : "encrypted";
+        Card card = "simple".equalsIgnoreCase(storageType)
+                ? simpleCardMapper.findById(id)
+                : cardMapper.findById(id);
         if (card == null) {
             throw new RuntimeException("卡密不存在");
+        }
+        if (card.getStorageType() == null) {
+            card.setStorageType(storageType);
         }
 
         boolean advanced = card.getEncryptionType() != null && "advanced".equalsIgnoreCase(card.getEncryptionType());
@@ -717,7 +871,7 @@ public class CardService {
             }
         }
 
-        cardMapper.update(card);
+        persistCard(card);
     }
 
     /**
@@ -725,9 +879,37 @@ public class CardService {
      */
     @Transactional
     public String updateAdminCardStatus(Long id, int targetStatus) {
-        Card card = cardMapper.findById(id);
+        return updateAdminCardStatus(id, targetStatus, "encrypted");
+    }
+
+    @Transactional
+    public String updateAdminCardStatus(Long id, int targetStatus, String storageType) {
+        Card card = "simple".equalsIgnoreCase(storageType)
+                ? simpleCardMapper.findById(id)
+                : cardMapper.findById(id);
         if (card == null) {
             throw new RuntimeException("卡密不存在");
+        }
+        if ("simple".equalsIgnoreCase(storageType)) {
+            if (targetStatus == 2) {
+                if (Integer.valueOf(2).equals(card.getStatus())) {
+                    return "卡密已处于暂停状态";
+                }
+                boolean pausedAfterUse = Integer.valueOf(1).equals(card.getStatus()) || card.getUseTime() != null;
+                simpleCardMapper.updateStatusOnly(id, 2);
+                return pausedAfterUse
+                        ? "卡密已暂停；该卡密此前已激活，用户校验时将提示「卡密被停止使用」"
+                        : "卡密已暂停";
+            }
+            if (targetStatus == 1) {
+                if (!Integer.valueOf(2).equals(card.getStatus())) {
+                    throw new RuntimeException("仅暂停状态的卡密可恢复启用");
+                }
+                int restored = card.getUseTime() != null ? 1 : 0;
+                simpleCardMapper.updateStatusOnly(id, restored);
+                return "卡密已恢复启用";
+            }
+            throw new RuntimeException("不支持的状态操作");
         }
         boolean advanced = card.getEncryptionType() != null && "advanced".equalsIgnoreCase(card.getEncryptionType());
         String hash = card.getEncryptedKey();
@@ -1014,7 +1196,7 @@ public class CardService {
                         && Boolean.TRUE.equals(cardMetadata.getStackTimeIfSameMachine())
                         && machineCode != null && !machineCode.isEmpty()
                         && cardMetadata.getDuration() != null && cardMetadata.getDuration() > 0) {
-                    Card anchor = pickBestStackAnchor(machineCode, cardMetadata.getApiKeyId(), cardMetadata.getId());
+                    Card anchor = pickBestStackAnchor(machineCode, cardMetadata.getApiKeyId(), cardMetadata.getId(), false);
                     if (anchor != null) {
                         extendAnchorSubscription(anchor, cardMetadata.getDuration());
                         cardMapper.markCardMergedInto(cardMetadata.getId(), anchor.getId(), nowInner, machineCode,
@@ -1156,7 +1338,14 @@ public class CardService {
         if (trimmed.contains("$")) {
             return resolveAdvancedCardRowForPublic(trimmed);
         }
-        return cardMapper.findByCardKey(trimmed);
+        Card plain = cardMapper.findByCardKey(trimmed);
+        if (plain != null) {
+            if (plain.getStorageType() == null) {
+                plain.setStorageType("encrypted");
+            }
+            return plain;
+        }
+        return simpleCardMapper.findByCardKey(trimmed);
     }
 
     private Card resolveAdvancedCardRowForPublic(String fullKey) {
@@ -1240,9 +1429,51 @@ public class CardService {
         Long apiKeyId = card.getApiKeyId();
         card.setMachineCode(null);
         card.setDeviceId(null);
-        cardMapper.update(card);
+        persistCard(card);
         if (apiKeyId != null) {
             apiKeyMachineSpecRedemptionMapper.deleteByApiKeyAndMachine(apiKeyId, mc);
+        }
+    }
+
+    private static final String SIMPLE_KEY_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+    private String generateSimpleCardKey(int length) {
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            sb.append(SIMPLE_KEY_CHARS.charAt(random.nextInt(SIMPLE_KEY_CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    private void assertCardKeyGloballyUnique(String key) {
+        if (cardMapper.findByCardKey(key) != null || simpleCardMapper.existsByCardKey(key)) {
+            throw new RuntimeException("卡密已存在: " + key);
+        }
+    }
+
+    private boolean isSimpleStorage(Card card) {
+        return card != null && "simple".equalsIgnoreCase(card.getStorageType());
+    }
+
+    private void persistCard(Card card) {
+        if (isSimpleStorage(card)) {
+            simpleCardMapper.update(card);
+        } else {
+            cardMapper.update(card);
+        }
+    }
+
+    private Card reloadCardById(Long id, boolean simpleStorage) {
+        return simpleStorage ? simpleCardMapper.findById(id) : cardMapper.findById(id);
+    }
+
+    private void markCardMergedInto(Long consumedId, Long anchorId, LocalDateTime useTime,
+                                    String machineCode, String deviceId, String ipAddress, boolean simpleStorage) {
+        if (simpleStorage) {
+            simpleCardMapper.markCardMergedInto(consumedId, anchorId, useTime, machineCode, deviceId, ipAddress);
+        } else {
+            cardMapper.markCardMergedInto(consumedId, anchorId, useTime, machineCode, deviceId, ipAddress);
         }
     }
 }

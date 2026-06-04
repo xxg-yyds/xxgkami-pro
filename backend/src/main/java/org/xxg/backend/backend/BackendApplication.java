@@ -5,7 +5,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import jakarta.annotation.PostConstruct;
 import java.util.TimeZone;
 
-@SpringBootApplication
+@SpringBootApplication(exclude = {
+        org.springframework.boot.autoconfigure.session.SessionAutoConfiguration.class
+})
 public class BackendApplication {
 
     @PostConstruct

@@ -135,6 +135,10 @@
           <button type="button" @click="showRegister = true" class="link-button">
             立即注册
           </button>
+          <span class="register-divider">|</span>
+          <button type="button" class="link-button" @click="userType = 'admin'; window.location.hash = '#/admin'">
+            管理员入口
+          </button>
         </div>
       </form>
 
@@ -363,6 +367,13 @@ const props = defineProps({
 const userType = ref(props.initialUserType)
 const emit = defineEmits(['login-success', 'switch-to-user'])
 
+watch(
+  () => props.initialUserType,
+  (v) => {
+    if (v) userType.value = v
+  }
+)
+
 const switchToUser = () => {
   userType.value = 'user'
   errorMessage.value = ''
@@ -477,6 +488,12 @@ const oauthLoginTypes = reactive({
 })
 
 onMounted(async () => {
+  const prefill = sessionStorage.getItem('prefill_admin_username')
+  if (prefill && userType.value === 'admin') {
+    loginForm.username = prefill
+    sessionStorage.removeItem('prefill_admin_username')
+  }
+
   // Check for OAuth Register Mode
   const hash = window.location.hash
   if (hash.includes('mode=oauth_register')) {
@@ -849,29 +866,32 @@ const handleLogin = async () => {
     if (response.success) {
       // Close TOTP modal if open
       showTotpInput.value = false;
-      
-      const resultData = response.data;
-      successMessage.value = response.message || '登录成功！'
-      
-      if (resultData && resultData.userInfo) {
-        localStorage.setItem('userInfo', JSON.stringify(resultData.userInfo))
-        localStorage.setItem('isLoggedIn', 'true')
-        if (resultData.token) {
-          localStorage.setItem('token', resultData.token);
-        }
-        if (resultData.refreshToken) {
-          localStorage.setItem('refreshToken', resultData.refreshToken);
-        }
+
+      const resultData = response.data || {}
+      if (!resultData.userInfo) {
+        errorMessage.value = '登录成功但返回数据不完整，请刷新后重试'
+        return
       }
-      
+      successMessage.value = response.message || '登录成功！'
+
+      localStorage.setItem('userInfo', JSON.stringify(resultData.userInfo))
+      localStorage.setItem('isLoggedIn', 'true')
+      if (resultData.token) {
+        localStorage.setItem('token', resultData.token)
+      }
+      if (resultData.refreshToken) {
+        localStorage.setItem('refreshToken', resultData.refreshToken)
+      }
+
       emit('login-success', {
         userInfo: resultData.userInfo,
-        token: resultData.token
+        token: resultData.token,
+        refreshToken: resultData.refreshToken
       })
-      
+
       setTimeout(() => {
         resetForm()
-      }, 1000)
+      }, 800)
     } else {
       // Check for TOTP requirement
       if (response.message === 'TOTP_REQUIRED') {

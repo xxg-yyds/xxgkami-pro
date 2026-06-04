@@ -142,7 +142,7 @@ detect_network_region() {
     IS_CHINA=false
     if curl -s --connect-timeout 5 https://www.google.com >/dev/null 2>&1; then
         echo -e "${GREEN}检测到国外网络环境${NC}"
-        GIT_REPO="https://github.com/xiaoxiaoguai-yyds/xxgkami-pro.git"
+        GIT_REPO="https://github.com/xxg-yyds/xxgkami-pro.git"
     else
         IS_CHINA=true
         echo -e "${GREEN}检测到国内网络环境${NC}"
@@ -174,18 +174,14 @@ need_mysql_install() {
     fi
     [ -z "$v" ] && return 1
     if ! awk -v a="$v" 'BEGIN {exit !(a > 5.0)}'; then return 1; fi
-    # 仅检测到客户端不够：要求本地 mysqld/mariadb 已运行并可响应 ping（避免 dpk g 半截仍显示「通过」）
-    if systemctl list-unit-files 2>/dev/null | grep -qE '^mysql\.service'; then
-        systemctl is-active --quiet mysql 2>/dev/null || return 1
-    elif systemctl list-unit-files 2>/dev/null | grep -qE '^mysqld\.service'; then
-        systemctl is-active --quiet mysqld 2>/dev/null || return 1
-    elif systemctl list-unit-files 2>/dev/null | grep -qE '^mariadb\.service'; then
-        systemctl is-active --quiet mariadb 2>/dev/null || return 1
-    else
-        # 无 systemd 列表时退化为 ping
-        :
+    # 以「能否 ping 通本机 mysqld」为准（兼容宝塔/自定义单元名：list-unit-files 里仅有 mysql.service 但 inactive、实际由其它方式拉起等情况）
+    if _mysql_ping_ok; then
+        return 0
     fi
-    _mysql_ping_ok && return 0
+    # 补充：若 systemd 明确登记了 mysql/mysqld/mariadb 且为 active，仍视为就绪（极少数仅 TCP、无 socket 的环境）
+    if systemctl is-active --quiet mysql 2>/dev/null || systemctl is-active --quiet mysqld 2>/dev/null || systemctl is-active --quiet mariadb 2>/dev/null; then
+        return 0
+    fi
     return 1
 }
 
@@ -468,6 +464,7 @@ install_nginx_pkg() {
     fi
 
     if [ -f /etc/debian_version ]; then
+        _xxgkami_debian_prepare_apt_when_mysql_pkg_pending
         DEBIAN_FRONTEND=noninteractive apt-get update -y
         DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
     elif [ -f /etc/redhat-release ]; then
@@ -516,9 +513,64 @@ XXGKAMI_MYSQL_CNF_EOF
     return 0
 }
 
+# Debian/Ubuntu：部分宿主/内核上 InnoDB 默认 O_DIRECT 会导致首次 mysqld 启动失败（Error 22 Invalid argument / ibdata1 无法创建）
+# 每次都覆盖写入，避免脚本升级后因「文件已存在」而沿用旧片段或仍为默认参数。
+_mysql_write_innodb_workaround_cnf_debian() {
+    [ -f /etc/debian_version ] || return 0
+    mkdir -p /etc/mysql/mysql.conf.d
+    local f=/etc/mysql/mysql.conf.d/zz-xxgkami-innodb-workaround.cnf
+    local ft
+    ft=$(mktemp /tmp/xxgkami-innodb-workaround.cnf.XXXXXX 2>/dev/null || echo "/tmp/xxgkami-innodb-workaround.cnf.$$")
+    cat >"$ft" << 'XXGKAMI_INNODB_WORKAROUND_EOF'
+[mysqld]
+# xxgkami: 规避部分 VPS/容器上 InnoDB 初始化 EINVAL（常与 O_DIRECT / native AIO / 异常 IO 后端有关）
+innodb_flush_method = fsync
+innodb_use_native_aio = 0
+innodb_read_io_threads = 1
+innodb_write_io_threads = 1
+XXGKAMI_INNODB_WORKAROUND_EOF
+    chmod 644 "$ft"
+    mv -f "$ft" "$f"
+    chmod 644 "$f"
+    echo -e "${YELLOW}[MySQL] 已写入 InnoDB 兼容片段（覆盖刷新）: $f （若不再需要可手动删除）${NC}"
+}
+
+# 任意 apt-get install 前调用：未完成配置的 mysql-server 会在装 Node/Redis/JDK 时被 dpkg 连带拉起并失败（整轮 apt 退出码非 0）
+_xxgkami_debian_prepare_apt_when_mysql_pkg_pending() {
+    [ -f /etc/debian_version ] || return 0
+    _mysql_ensure_etc_mysql_cnf_debian
+    _mysql_write_innodb_workaround_cnf_debian
+    mkdir -p /var/run/mysqld
+    if id mysql &>/dev/null 2>&1; then chown mysql:mysql /var/run/mysqld; fi
+    chmod 755 /var/run/mysqld 2>/dev/null || true
+    if [ -d /var/lib/mysql ] && id mysql &>/dev/null 2>&1; then
+        chown -R mysql:mysql /var/lib/mysql 2>/dev/null || true
+    fi
+
+    local st need=false pkg
+    # 勿用「dpkg -l | awk NR==2」：`NR==2` 实为表头行，无法判定包本体状态。
+    for pkg in mysql-server-8.0 mysql-server; do
+        st=$(dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null || true)
+        [ -z "$st" ] && continue
+        case "$st" in
+            "install ok installed") ;;
+            not-installed*|deinstall*|purge*|unknown*) continue ;;
+            *) need=true; break ;;
+        esac
+    done
+
+    [ "$need" != true ] && return 0
+
+    echo -e "${YELLOW}[APT][MySQL] 检测到 mysql-server 相关包未完成 dpkg 配置；已应用 InnoDB 兼容项并重试 configure（可避免装 Node/Java 时被连带拉起失败）。${NC}"
+    DEBIAN_FRONTEND=noninteractive dpkg --configure mysql-server-8.0 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive dpkg --configure mysql-server 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -f 2>/dev/null || true
+}
+
 # Ubuntu/Debian：修复常见「无法拉起 mysqld」（/var/run/mysqld、数据目录属主、dpkg 中断）
 _mysql_fix_runtime_debian() {
     _mysql_ensure_etc_mysql_cnf_debian
+    _mysql_write_innodb_workaround_cnf_debian
     mkdir -p /var/run/mysqld
     if id mysql &>/dev/null; then
         chown mysql:mysql /var/run/mysqld
@@ -533,6 +585,8 @@ _mysql_fix_runtime_debian() {
             chown -R _mysql:_mysql /var/lib/mysql
         fi
     fi
+    # 对已半配置的 mysql-server 先 targeted configure + apt -f（状态检测勿用 NR==2 误解析）
+    _xxgkami_debian_prepare_apt_when_mysql_pkg_pending
     DEBIAN_FRONTEND=noninteractive dpkg --configure -a 2>/dev/null || true
 }
 
@@ -875,7 +929,7 @@ install_mysql_pkg() {
                 echo -e "${RED}[MySQL] 服务启动失败，请根据上方自检信息处理。${NC}"
                 echo -e "${YELLOW}常见处理：${NC}"
                 echo -e "${YELLOW}  · 若为 update-alternatives 报 /etc/mysql/mysql.cnf 不存在：本脚本已尝试自动补齐；仍可执行: sudo apt install --reinstall mysql-common ; sudo dpkg --configure -a${NC}"
-                echo -e "${YELLOW}  · 若为数据目录损坏：清理后重装（会删库）: sudo apt purge 'mysql-server*' ; sudo rm -rf /var/lib/mysql /var/log/mysql ; 再执行安装${NC}"
+                echo -e "${YELLOW}  · 若日志为 Failed to start mysqld / Error 22 / ibdata1：脚本会写入 /etc/mysql/mysql.conf.d/zz-xxgkami-innodb-workaround.cnf；仍失败可: sudo apt purge 'mysql-server*' ; sudo rm -rf /var/lib/mysql /var/log/mysql ; sudo dpkg --configure -a ; 再重装（会删库）${NC}"
                 return 1
             fi
         fi
@@ -937,6 +991,7 @@ install_redis_pkg() {
         if [ "$IS_CHINA" = true ]; then
             echo -e "${YELLOW}国内环境：使用系统 APT 镜像源加速 redis-server${NC}"
         fi
+        _xxgkami_debian_prepare_apt_when_mysql_pkg_pending
         DEBIAN_FRONTEND=noninteractive apt-get update -y
         DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server
         systemctl enable redis-server
@@ -956,6 +1011,7 @@ install_redis_pkg() {
 # Debian/Ubuntu：APT 不含 openjdk-20-jdk 时（常见于 Ubuntu 22.04 Jammy），使用 Adoptium Temurin 20
 _install_java20_via_temurin_debian() {
     echo -e "${YELLOW}[Java] 系统源无 JDK 20 时改用 Eclipse Temurin（Adoptium）APT …${NC}"
+    _xxgkami_debian_prepare_apt_when_mysql_pkg_pending
     DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl wget gnupg || true
 
     mkdir -p /etc/apt/keyrings
@@ -1110,6 +1166,7 @@ install_java20_pkg() {
         if [ "$IS_CHINA" = true ]; then
             echo -e "${YELLOW}国内环境：可先配置阿里云等 APT 镜像；JDK 若走 Temurin 将按需拉取 Adoptium 仓库${NC}"
         fi
+        _xxgkami_debian_prepare_apt_when_mysql_pkg_pending
         DEBIAN_FRONTEND=noninteractive apt-get update -y
         if DEBIAN_FRONTEND=noninteractive apt-get install -y openjdk-20-jdk 2>/dev/null; then
             return 0
@@ -1140,6 +1197,7 @@ install_java20_pkg() {
 install_node22_pkg() {
     echo -e "${BLUE}安装 Node.js 22.x…${NC}"
     if [ -f /etc/debian_version ]; then
+        _xxgkami_debian_prepare_apt_when_mysql_pkg_pending
         DEBIAN_FRONTEND=noninteractive apt-get update -y
         DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
         _run_nodesource_setup_22
@@ -1158,7 +1216,7 @@ install_node22_pkg() {
 print_runtime_needs_summary() {
     echo -e "${BLUE}======== 当前运行时检测结果 ========${NC}"
     need_nginx_install >/dev/null 2>&1 && echo -e "  Nginx    : ${GREEN}[已就绪]$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -n 1 || true)${NC}" || echo -e "  Nginx    : ${RED}[需安装或升级]${NC}"
-    need_mysql_install >/dev/null 2>&1 && echo -e "  MySQL    : ${GREEN}[已就绪]$(mysql -V 2>&1 | head -n 1 | cut -c1-48)…${NC}" || echo -e "  MySQL    : ${RED}[需安装或版本≤5.0 / 缺失客户端]${NC}"
+    need_mysql_install >/dev/null 2>&1 && echo -e "  MySQL    : ${GREEN}[已就绪]$(mysql -V 2>&1 | head -n 1 | cut -c1-48)…${NC}" || echo -e "  MySQL    : ${RED}[未就绪] 无客户端/版本≤5.0/本机 mysqld 无法 ping 或服务未启动（与主菜单「仅客户端」提示一致）${NC}"
     need_redis_install >/dev/null 2>&1 && echo -e "  Redis    : ${GREEN}[已就绪]${NC}" || echo -e "  Redis    : ${RED}[需安装或升级]${NC}"
     need_java_install >/dev/null 2>&1 && echo -e "  Java JDK : ${GREEN}[已就绪 JDK 20+]${NC}" || echo -e "  Java JDK : ${RED}[需安装或升级]${NC}"
     need_node_install >/dev/null 2>&1 && echo -e "  Node.js  : ${GREEN}[已就绪 $(node -v 2>/dev/null)]${NC}" || echo -e "  Node.js  : ${RED}[需安装或升级至 22+]${NC}"
@@ -1280,7 +1338,7 @@ show_menu() {
     echo -e "${BLUE}        XXG-KAMI-PRO 一键部署脚本 v1.1          ${NC}"
     echo -e "${BLUE}================================================${NC}"
     echo -e "欢迎使用小小怪卡密管理系统安装脚本！"
-    echo -e "开源地址: https://github.com/xiaoxiaoguai-yyds/xxgkami-pro"
+    echo -e "开源地址: https://github.com/xxg-yyds/xxgkami-pro"
     echo -e "管理系统售后群: 1050160397"
     echo -e "${BLUE}================================================${NC}"
     echo -e "系统信息:"
@@ -1326,29 +1384,33 @@ show_menu() {
     fi
     NGINX_MSG=$(check_env_status "1.18" "$NGINX_VER" "$NGINX_INSTALLED")
 
-    # 3. MySQL Check（> 5.0；8.0+ 与 5.x 使用不同 SQL）
+    # 3. MySQL：与 need_mysql_install 对齐 — 仅「客户端在 PATH」不等于本机 mysqld 已就绪
+    MYSQL_VER="0"
+    MYSQL_MSG=""
     if command -v mysql >/dev/null 2>&1; then
-        MYSQL_INSTALLED="true"
-        # 优先匹配 Distrib x.x, 其次 Ver x.x
         MYSQL_VER=$(mysql -V 2>&1 | grep -oE '(Distrib|Ver) [0-9]+\.[0-9]+' | awk '{print $2}' | head -n 1)
         MYSQL_VER=$(echo "$MYSQL_VER" | grep -oE '[0-9]+\.[0-9]+' | head -n 1)
-    else
-        MYSQL_INSTALLED="false"
-        MYSQL_VER="0"
     fi
-    MYSQL_MSG=""
-    if [ "$MYSQL_INSTALLED" != "true" ]; then
-        MYSQL_MSG="${RED}[未安装]${NC}"
-    elif [ -z "$MYSQL_VER" ]; then
-        MYSQL_MSG="${YELLOW}[已安装·无法解析版本] 请自行确认已按版本准备正确 SQL${NC}"
-    elif awk "BEGIN {exit !($MYSQL_VER > 5.0)}" ; then
-        if awk "BEGIN {exit !($MYSQL_VER >= 8.0)}" ; then
-            MYSQL_MSG="${GREEN}[已安装] ${MYSQL_VER}${NC} — ${GREEN}可运行 MySQL 8.0+ 配套脚本，请使用默认 kami.sql${NC}"
+    if need_mysql_install >/dev/null 2>&1; then
+        if awk "BEGIN {exit !(${MYSQL_VER:-0} > 5.0)}" 2>/dev/null; then
+            if awk "BEGIN {exit !(${MYSQL_VER:-0} >= 8.0)}" 2>/dev/null; then
+                MYSQL_MSG="${GREEN}[已就绪] ${MYSQL_VER}${NC} — ${GREEN}本机 mysqld 可连接；MySQL 8+ 配套 kami.sql${NC}"
+            else
+                MYSQL_MSG="${GREEN}[已就绪] ${MYSQL_VER}${NC} — ${YELLOW}本机 mysqld 可连接；5.x 兼容 kami_mysql56.sql${NC}"
+            fi
         else
-            MYSQL_MSG="${GREEN}[已安装] ${MYSQL_VER}${NC} — ${YELLOW}可运行 MySQL 5.x 兼容脚本，请使用如 kami_mysql56.sql${NC}"
+            MYSQL_MSG="${GREEN}[已就绪]${NC} — ${GREEN}本机 mysqld 可连接（客户端版本号解析异常，以服务端为准）${NC}"
+        fi
+    elif command -v mysql >/dev/null 2>&1; then
+        if [ -z "$MYSQL_VER" ]; then
+            MYSQL_MSG="${YELLOW}[仅客户端] mysql 在 PATH 中但无法解析版本；且本机 mysqld 未就绪 — 请启动数据库或检查 socket${NC}"
+        elif awk "BEGIN {exit !($MYSQL_VER > 5.0)}" ; then
+            MYSQL_MSG="${YELLOW}[仅客户端] mysql ${MYSQL_VER} 在 PATH 中，但本机 mysqld 未就绪（分步安装会提示需安装）— 请执行: systemctl start mysql 或检查是否仅装了 mysql-client${NC}"
+        else
+            MYSQL_MSG="${RED}[版本过低] ${MYSQL_VER}（需服务端 > 5.0 且可 ping）${NC}"
         fi
     else
-        MYSQL_MSG="${RED}[版本过低] ${MYSQL_VER}（需 MySQL 严格大于 5.0）${NC}"
+        MYSQL_MSG="${RED}[未安装]${NC} — 无 mysql 客户端或未加入 PATH"
     fi
 
     # 4. Redis Check (6.0+)
@@ -1420,7 +1482,7 @@ while true; do
             ;;
         3)
             echo -e "${YELLOW}正在更新脚本...${NC}"
-            _RAW_MASTER="https://raw.githubusercontent.com/xiaoxiaoguai-yyds/xxgkami-pro/refs/heads/master/install.sh"
+            _RAW_MASTER="https://raw.githubusercontent.com/xxg-yyds/xxgkami-pro/refs/heads/master/install.sh"
             if wget -O install.sh "${GH_PROXY_CN}/${_RAW_MASTER}" 2>/dev/null || curl -fsSL -o install.sh "${GH_PROXY_CN}/${_RAW_MASTER}"; then
                 chmod +x install.sh
             elif wget -O install.sh "$_RAW_MASTER" 2>/dev/null || curl -fsSL -o install.sh "$_RAW_MASTER"; then
@@ -2053,7 +2115,7 @@ while true; do
                 echo -e "\${BLUE}================================================\${NC}"
                 echo -e "\${GREEN}感谢您使用小小怪卡密管理系统！\${NC}"
                 echo -e "山水有相逢，愿我们在代码的世界里再次相遇。"
-                echo -e "项目开源地址: https://github.com/xiaoxiaoguai-yyds/xxgkami-pro"
+                echo -e "项目开源地址: https://github.com/xxg-yyds/xxgkami-pro"
                 echo -e "管理系统售后群: 1050160397"
                 echo -e "\${BLUE}================================================\${NC}"
                 
@@ -2285,6 +2347,7 @@ check_mysql_version
 
 if [ -f /etc/debian_version ]; then
     # Debian/Ubuntu（索引已在 [1/8] 开始处 apt-get update）
+    _xxgkami_debian_prepare_apt_when_mysql_pkg_pending
     DEBIAN_FRONTEND=noninteractive apt-get install -y git curl wget unzip maven
 elif [ -f /etc/redhat-release ]; then
     # CentOS 7 maven 等在 EPEL 或 PowerTools/Codeready 较多；先做 EPEL 再安装
@@ -3642,7 +3705,7 @@ while true; do
                 echo -e "\${BLUE}================================================\${NC}"
                 echo -e "\${GREEN}感谢您使用小小怪卡密管理系统！\${NC}"
                 echo -e "山水有相逢，愿我们在代码的世界里再次相遇。"
-                echo -e "项目开源地址: https://github.com/xiaoxiaoguai-yyds/xxgkami-pro"
+                echo -e "项目开源地址: https://github.com/xxg-yyds/xxgkami-pro"
                 echo -e "管理系统售后群: 1050160397"
                 echo -e "\${BLUE}================================================\${NC}"
                 

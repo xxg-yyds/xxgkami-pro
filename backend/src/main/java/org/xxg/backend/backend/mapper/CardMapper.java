@@ -416,6 +416,7 @@ public class CardMapper {
                 }
             } catch (SQLException ignored) {
             }
+            card.setStorageType("encrypted");
             return card;
         }
     }

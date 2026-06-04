@@ -16,15 +16,20 @@ import java.util.Map;
 public class SettingsService {
 
     private final SettingsMapper settingsMapper;
+    private final SetupMarkerService setupMarkerService;
 
-    public SettingsService(SettingsMapper settingsMapper) {
+    public SettingsService(SettingsMapper settingsMapper, SetupMarkerService setupMarkerService) {
         this.settingsMapper = settingsMapper;
+        this.setupMarkerService = setupMarkerService;
     }
 
     /**
      * 获取所有设置并转为Map
      */
     public Map<String, String> getAllSettings() {
+        if (!setupMarkerService.isBusinessDatabaseReady()) {
+            return Map.of();
+        }
         List<Setting> settings = settingsMapper.findAll();
         Map<String, String> settingsMap = new HashMap<>();
         for (Setting setting : settings) {

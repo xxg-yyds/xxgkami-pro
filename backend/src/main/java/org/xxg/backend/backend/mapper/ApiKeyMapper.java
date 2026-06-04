@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 import org.xxg.backend.backend.entity.ApiKey;
 import org.xxg.backend.backend.entity.User;
+import org.xxg.backend.backend.service.SetupMarkerService;
 
 import jakarta.annotation.PostConstruct;
 import java.sql.ResultSet;
@@ -16,15 +17,20 @@ import java.util.List;
 public class ApiKeyMapper {
 
     private final JdbcTemplate jdbcTemplate;
+    private final SetupMarkerService setupMarkerService;
 
-    public ApiKeyMapper(JdbcTemplate jdbcTemplate) {
+    public ApiKeyMapper(JdbcTemplate jdbcTemplate, SetupMarkerService setupMarkerService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.setupMarkerService = setupMarkerService;
     }
 
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ApiKeyMapper.class);
 
     @PostConstruct
     public void initSchema() {
+        if (!setupMarkerService.isBusinessDatabaseReady()) {
+            return;
+        }
         logger.info("Initializing ApiKey schema...");
         
         // 1. Create api_keys table

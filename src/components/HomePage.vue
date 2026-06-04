@@ -342,7 +342,7 @@
     <!-- 底部动图 (白色区域) -->
     <div class="mascot-section">
       <div class="mascot-container">
-        <img src="../assets/icon.gif" alt="XXG Mascot">
+        <img src="../assets/icon.png" alt="XXG Mascot">
       </div>
     </div>
 

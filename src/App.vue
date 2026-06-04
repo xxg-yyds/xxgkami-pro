@@ -1,12 +1,20 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import HomePage from './components/HomePage.vue'
 import OnlineUnbindPage from './components/OnlineUnbindPage.vue'
 import LoginForm from './components/loginform.vue'
 import Dashboard from './components/Dashboard.vue'
 import UserPage from './components/UserPage.vue'
 import NotificationPage from './components/NotificationPage.vue'
-import { authApi, maintenanceApi, userProfileApi } from './services/api.js'
+import { authApi, maintenanceApi, userProfileApi, setupApi } from './services/api.js'
+import SystemSetupPage from './components/SystemSetupPage.vue'
+import setupLogo from './assets/icon.png'
+
+const logoMaskVars = {
+  '--setup-logo-mask': `url(${setupLogo})`
+}
+const brandLogo = setupLogo
 
 // 响应式数据
 const currentPage = ref('home') // 默认为首页
@@ -15,38 +23,128 @@ const isLoggedIn = ref(false)
 const userInfo = ref(null)
 const loading = ref(true)
 const maintenanceData = ref({ enabled: false, content: '', maintenanceTime: '' })
+const setupRequired = ref(false)
+const versionUpgradeRequired = ref(false)
+const setupPageMode = ref('default')
+
+/** 安装向导 / 新版升级检测 */
+const refreshSetupStatus = async () => {
+  try {
+    const res = await setupApi.getStatus()
+    const d = res.data || {}
+    setupRequired.value = !!(res.success && d.needsSetupWizard)
+    versionUpgradeRequired.value = !!(res.success && !d.needsSetupWizard && d.needsVersionUpgradeCheck)
+    setupPageMode.value = versionUpgradeRequired.value ? 'version-upgrade' : 'default'
+  } catch {
+    setupRequired.value = false
+    versionUpgradeRequired.value = false
+    setupPageMode.value = 'default'
+  }
+}
+
+const routeAdminAfterAuth = () => {
+  if (setupRequired.value || versionUpgradeRequired.value) {
+    currentPage.value = 'system-setup'
+  } else {
+    currentPage.value = 'dashboard'
+  }
+}
+
+const readStoredAuth = () => ({
+  token: localStorage.getItem('token'),
+  userInfo: localStorage.getItem('userInfo'),
+  isLoggedIn: localStorage.getItem('isLoggedIn') === 'true'
+})
+
+const persistAuth = (data) => {
+  if (!data?.userInfo) {
+    return false
+  }
+  userInfo.value = data.userInfo
+  isLoggedIn.value = true
+  localStorage.setItem('userInfo', JSON.stringify(data.userInfo))
+  localStorage.setItem('isLoggedIn', 'true')
+  if (data.token) {
+    localStorage.setItem('token', data.token)
+  }
+  if (data.refreshToken) {
+    localStorage.setItem('refreshToken', data.refreshToken)
+  }
+  return true
+}
+
+const tryAutoAdminLogin = async (payload) => {
+  const username = payload?.adminUsername || 'admin'
+  const hint = payload?.adminPasswordHint || ''
+  const canTryDefault =
+    hint.includes('123456') ||
+    hint.includes('默认密码') ||
+    payload?.tryDefaultPassword === true
+  if (!canTryDefault) {
+    return false
+  }
+  try {
+    const res = await authApi.loginAdmin(username, '123456')
+    if (res.success && res.data?.userInfo) {
+      persistAuth({
+        userInfo: res.data.userInfo,
+        token: res.data.token,
+        refreshToken: res.data.refreshToken
+      })
+      await refreshSetupStatus()
+      routeAdminAfterAuth()
+      return true
+    }
+  } catch (e) {
+    console.warn('安装后自动登录失败，将跳转登录页', e)
+  }
+  return false
+}
 
 // 检查登录状态
 const checkLoginStatus = async () => {
   try {
-    // 从 localStorage 获取登录信息
-    const storedToken = localStorage.getItem('token')
-    const storedUserInfo = localStorage.getItem('userInfo')
-    const storedIsLoggedIn = localStorage.getItem('isLoggedIn')
+    let { token: storedToken, userInfo: storedUserInfo, isLoggedIn: storedIsLoggedIn } = readStoredAuth()
 
     // 1. 优先尝试恢复登录状态
-    if (storedToken && storedUserInfo && storedIsLoggedIn === 'true') {
+    if (storedToken && storedUserInfo && storedIsLoggedIn) {
       const parsedUserInfo = JSON.parse(storedUserInfo)
       isLoggedIn.value = true
       userInfo.value = parsedUserInfo
-      
-      // 如果已登录，根据用户类型跳转到对应页面
+
       if (parsedUserInfo.role === 'admin') {
-        currentPage.value = 'dashboard'
+        await refreshSetupStatus()
+        routeAdminAfterAuth()
       } else {
         currentPage.value = 'user'
       }
+      return
+    }
+
+    // 2. 未登录：避免与刚完成的登录写入竞态，延迟再读一次
+    await new Promise((r) => setTimeout(r, 0))
+    const retry = readStoredAuth()
+    if (retry.token && retry.userInfo && retry.isLoggedIn) {
+      await checkLoginStatus()
+      return
+    }
+
+    const path = window.location.pathname
+    const hash = window.location.hash
+    if (path.includes('/admin') || hash.includes('admin')) {
+      loginType.value = 'admin'
+      await refreshSetupStatus()
+      currentPage.value =
+        setupRequired.value || versionUpgradeRequired.value ? 'system-setup' : 'login'
+    } else if (setupRequired.value || versionUpgradeRequired.value) {
+      loginType.value = 'admin'
+      currentPage.value = 'system-setup'
     } else {
-      // 2. 如果未登录，再检查是否是管理员登录路径
-      const path = window.location.pathname
-      const hash = window.location.hash
-      if (path.includes('/admin') || hash.includes('admin')) {
-        loginType.value = 'admin'
-        currentPage.value = 'login'
-      } else {
-        // 默认状态
-        isLoggedIn.value = false
-        userInfo.value = null
+      isLoggedIn.value = false
+      userInfo.value = null
+      // 仅确认仍无 token 时再清理，避免覆盖刚写入的登录态
+      const finalCheck = readStoredAuth()
+      if (!finalCheck.token) {
         localStorage.removeItem('userInfo')
         localStorage.removeItem('isLoggedIn')
         localStorage.removeItem('token')
@@ -62,22 +160,59 @@ const checkLoginStatus = async () => {
   }
 }
 
-// 显示登录页面
+// 显示用户登录页
 const showLogin = () => {
   currentPage.value = 'login'
   loginType.value = 'user'
+  window.location.hash = '#/login'
+}
+
+// 显示管理员登录页（首页「登录管理」应走此入口）
+const showAdminLogin = () => {
+  loginType.value = 'admin'
+  currentPage.value = 'login'
+  window.location.hash = '#/admin'
 }
 
 // 处理登录成功
-const handleLoginSuccess = (data) => {
-  isLoggedIn.value = true
-  userInfo.value = data.userInfo
-  // 根据用户角色跳转到对应页面
+const handleLoginSuccess = async (data) => {
+  if (!persistAuth(data)) {
+    ElMessage.error('登录数据异常，请重试')
+    return
+  }
   if (data.userInfo.role === 'admin') {
-    currentPage.value = 'dashboard'
+    if (!window.location.hash.includes('admin')) {
+      window.location.hash = '#/admin'
+    }
+    await refreshSetupStatus()
+    routeAdminAfterAuth()
   } else {
     currentPage.value = 'user'
   }
+}
+
+const handleSetupFinished = async (payload) => {
+  setupRequired.value = false
+  versionUpgradeRequired.value = false
+  setupPageMode.value = 'default'
+
+  if (isLoggedIn.value && userInfo.value?.role === 'admin') {
+    currentPage.value = 'dashboard'
+    return
+  }
+
+  const autoOk = await tryAutoAdminLogin(payload)
+  if (autoOk) {
+    ElMessage.success('已进入管理后台')
+    return
+  }
+
+  loginType.value = 'admin'
+  currentPage.value = 'login'
+  if (payload?.adminUsername) {
+    sessionStorage.setItem('prefill_admin_username', payload.adminUsername)
+  }
+  ElMessage.info('请使用页面显示的管理员账号登录（初始密码多为 123456）')
 }
 
 // 处理登出
@@ -237,25 +372,29 @@ const handleOAuthCallback = async () => {
 
 // 组件挂载时检查登录状态
 onMounted(async () => {
-  await checkMaintenance()
-  
-  // 先检查 OAuth 回调
   const oauthSuccess = await handleOAuthCallback()
   if (!oauthSuccess) {
+    await refreshSetupStatus()
+    if (!setupRequired.value && !versionUpgradeRequired.value) {
+      await checkMaintenance()
+    }
     await checkLoginStatus()
   } else {
     loading.value = false
   }
-  
-  // 每30秒检查一次维护状态
-  setInterval(checkMaintenance, 30000)
+
+  setInterval(async () => {
+    if (!setupRequired.value && !versionUpgradeRequired.value) {
+      await checkMaintenance()
+    }
+  }, 30000)
 })
 </script>
 
 <template>
   <div id="app">
     <!-- 系统维护遮罩层 -->
-    <div v-if="maintenanceData && maintenanceData.enabled && (!isLoggedIn || userInfo?.role !== 'admin') && currentPage !== 'login' && currentPage !== 'dashboard' && currentPage !== 'online-unbind'" class="maintenance-overlay">
+    <div v-if="maintenanceData && maintenanceData.enabled && (!isLoggedIn || userInfo?.role !== 'admin') && currentPage !== 'login' && currentPage !== 'dashboard' && currentPage !== 'system-setup' && currentPage !== 'online-unbind'" class="maintenance-overlay">
       <div class="maintenance-content">
         <div class="maintenance-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -276,14 +415,33 @@ onMounted(async () => {
 
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-container">
-      <div class="loading-spinner"></div>
-      <p>正在加载...</p>
+      <div class="loading-bg" :style="logoMaskVars" aria-hidden="true">
+        <div class="loading-bg-shape loading-bg-shape--glow"></div>
+        <div class="loading-bg-shape loading-bg-shape--main"></div>
+      </div>
+      <div class="loading-content">
+        <div class="loading-card">
+          <img :src="brandLogo" class="loading-brand-icon" alt="" width="56" height="56" />
+          <h2 class="loading-brand">XXG-KAMI-PRO</h2>
+          <div class="loading-spinner-wrap" aria-hidden="true">
+            <span class="loading-ring loading-ring--outer"></span>
+            <span class="loading-ring loading-ring--inner"></span>
+          </div>
+          <p class="loading-text">
+            正在加载<span class="loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+          </p>
+          <div class="loading-bar-track" aria-hidden="true">
+            <div class="loading-bar-fill"></div>
+          </div>
+          <p class="loading-hint">正在连接服务，请稍候</p>
+        </div>
+      </div>
     </div>
     
     <!-- 首页 -->
     <HomePage 
       v-else-if="currentPage === 'home'" 
-      @show-login="showLogin"
+      @show-login="showAdminLogin"
       @go-online-unbind="currentPage = 'online-unbind'"
     />
 
@@ -293,6 +451,13 @@ onMounted(async () => {
       @show-login="showLogin"
     />
     
+    <!-- 首次系统初始化向导 -->
+    <SystemSetupPage
+      v-else-if="currentPage === 'system-setup'"
+      :initial-mode="setupPageMode"
+      @setup-finished="handleSetupFinished"
+    />
+
     <!-- 登录界面 -->
     <LoginForm 
       v-else-if="currentPage === 'login'" 
@@ -329,33 +494,262 @@ onMounted(async () => {
 }
 
 .loading-container {
+  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(79, 70, 229, 0.08), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 80% 100%, rgba(34, 211, 238, 0.06), transparent 50%),
+    #f4f6fb;
 }
 
-.loading-spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid rgba(255, 255, 255, 0.3);
-  border-top: 4px solid white;
+.loading-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: #ffffff;
+}
+
+.loading-bg-shape {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(165deg, #22d3ee 0%, #4f46e5 48%, #c026d3 100%);
+  -webkit-mask-image: var(--setup-logo-mask);
+  mask-image: var(--setup-logo-mask);
+  -webkit-mask-mode: luminance;
+  mask-mode: luminance;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  will-change: opacity, transform;
+}
+
+.loading-bg-shape--main {
+  width: min(108vmin, 960px);
+  filter: blur(18px) saturate(1.25);
+  animation: loading-logo-fade 6s ease-in-out infinite;
+}
+
+.loading-bg-shape--glow {
+  width: min(128vmin, 1120px);
+  filter: blur(42px) saturate(1.35);
+  animation: loading-logo-fade-glow 8s ease-in-out infinite;
+  animation-delay: -2.5s;
+}
+
+@keyframes loading-logo-fade {
+  0%,
+  100% {
+    opacity: 0.38;
+    transform: translate(-50%, -50%) scale(0.97);
+  }
+  50% {
+    opacity: 0.58;
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+}
+
+@keyframes loading-logo-fade-glow {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: translate(-50%, -50%) scale(1.02);
+  }
+  50% {
+    opacity: 0.48;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+}
+
+.loading-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.5rem;
+}
+
+.loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(100%, 320px);
+  padding: 2rem 2rem 1.75rem;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  border-radius: 20px;
+  box-shadow:
+    0 4px 24px rgba(15, 23, 42, 0.06),
+    0 24px 48px rgba(79, 70, 229, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: loading-card-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes loading-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.loading-brand-icon {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  margin-bottom: 0.75rem;
+  filter: drop-shadow(0 4px 12px rgba(79, 70, 229, 0.2));
+  animation: loading-icon-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes loading-icon-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 0.92;
+  }
+}
+
+.loading-brand {
+  margin: 0 0 1.25rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: linear-gradient(120deg, #4f46e5 0%, #7c3aed 45%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.loading-spinner-wrap {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 1.125rem;
+}
+
+.loading-ring {
+  position: absolute;
+  inset: 0;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 1rem;
+  border: 2px solid transparent;
+}
+
+.loading-ring--outer {
+  border-top-color: #4f46e5;
+  border-right-color: rgba(79, 70, 229, 0.25);
+  animation: spin 1.1s cubic-bezier(0.5, 0.1, 0.4, 0.9) infinite;
+}
+
+.loading-ring--inner {
+  inset: 8px;
+  border-bottom-color: #22d3ee;
+  border-left-color: rgba(34, 211, 238, 0.3);
+  animation: spin-reverse 0.85s linear infinite;
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.loading-container p {
-  font-size: 1.2rem;
+@keyframes spin-reverse {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+.loading-text {
+  margin: 0 0 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: #334155;
+  letter-spacing: 0.04em;
+}
+
+.loading-dots span {
+  display: inline-block;
+  animation: loading-dot 1.2s ease-in-out infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes loading-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.loading-bar-track {
+  width: 100%;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.loading-bar-fill {
+  width: 42%;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #4f46e5, #22d3ee, #c026d3, #4f46e5);
+  background-size: 200% 100%;
+  animation: loading-bar-slide 1.6s ease-in-out infinite;
+}
+
+@keyframes loading-bar-slide {
+  0% {
+    transform: translateX(-120%);
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    transform: translateX(320%);
+    background-position: 0% 50%;
+  }
+}
+
+.loading-hint {
   margin: 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
 }
 
 .main-container {

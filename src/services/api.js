@@ -366,6 +366,33 @@ export const monitorApi = {
    */
   async getAllMonitorData() {
     return await apiRequest('/monitor/all');
+  },
+
+  async checkUpdate() {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/monitor/check-update', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || data.message || '检查更新失败');
+    }
+    return { success: true, data, channel: res.headers.get('X-Update-Channel') };
+  },
+
+  async detectUpdatePaths() {
+    return await apiRequest('/monitor/update/paths');
+  },
+
+  async startOnlineUpdate(payload) {
+    return await apiRequest('/monitor/update/start', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  async getOnlineUpdateStatus() {
+    return await apiRequest('/monitor/update/status');
   }
 };
 
@@ -528,9 +555,28 @@ export const cardApi = {
   /**
    * 删除卡密
    */
-  async deleteCard(cardId) {
-    return await apiRequest(`/cards/${cardId}`, {
+  async deleteCard(cardId, storageType = 'encrypted') {
+    const st = encodeURIComponent(storageType || 'encrypted');
+    return await apiRequest(`/cards/${cardId}?storage_type=${st}`, {
       method: 'DELETE'
+    });
+  },
+
+  /**
+   * 管理员：批量删除卡密（可与单条相同的权限；含已使用/已过期等）
+   */
+  async batchDeleteCards(ids, storageTypes = null) {
+    const body = storageTypes
+      ? {
+          ids: ids.map((id, i) => ({
+            id,
+            storage_type: storageTypes[i] || 'encrypted'
+          }))
+        }
+      : { ids };
+    return await apiRequest('/cards/admin/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify(body)
     });
   },
 
@@ -547,10 +593,10 @@ export const cardApi = {
   /**
    * 管理员：暂停(2) / 恢复启用(1)
    */
-  async updateAdminStatus(cardId, status) {
+  async updateAdminStatus(cardId, status, storageType = 'encrypted') {
     return await apiRequest(`/cards/admin/${cardId}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status, storage_type: storageType })
     });
   },
 
@@ -883,6 +929,72 @@ export const maintenanceApi = {
 };
 
 /**
+ * 首次安装向导 API
+ */
+export const setupApi = {
+  async getStatus() {
+    return await apiRequest('/setup/status')
+  },
+  async getEnvironment() {
+    return await apiRequest('/setup/environment')
+  },
+  async testMysql(payload) {
+    return await apiRequest('/setup/mysql/test', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  async checkKamiDb(payload) {
+    return await apiRequest('/setup/mysql/check-db', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  async analyzeMerge(payload) {
+    return await apiRequest('/setup/mysql/analyze-merge', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  async analyzeMergeConfigured() {
+    return await apiRequest('/setup/mysql/analyze-merge-configured', { method: 'POST' })
+  },
+  async installConfigured(payload) {
+    return await apiRequest('/setup/mysql/install-configured', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  async installDatabase(payload) {
+    return await apiRequest('/setup/mysql/install', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  async completeSetup(meta = {}) {
+    return await apiRequest('/setup/complete', {
+      method: 'POST',
+      body: JSON.stringify(meta)
+    })
+  },
+  async completeVersionUpgrade(meta = {}) {
+    return await apiRequest('/setup/version-upgrade/complete', {
+      method: 'POST',
+      body: JSON.stringify(meta)
+    })
+  },
+  async startSqlTranslate(payload = { sqlSeries: '56' }) {
+    return await apiRequest('/setup/sql/translate', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  async getSqlTranslateStatus() {
+    return await apiRequest('/setup/sql/translate/status')
+  }
+}
+
+/**
  * 支付API服务
  */
 export const paymentApi = {
@@ -910,5 +1022,6 @@ export default {
   userProfileApi,
   maintenanceApi,
   pricingApi,
-  paymentApi
+  paymentApi,
+  setupApi
 };

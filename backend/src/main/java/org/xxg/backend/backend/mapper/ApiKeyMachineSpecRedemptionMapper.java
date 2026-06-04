@@ -3,6 +3,7 @@ package org.xxg.backend.backend.mapper;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.xxg.backend.backend.service.SetupMarkerService;
 
 import jakarta.annotation.PostConstruct;
 
@@ -13,13 +14,18 @@ import jakarta.annotation.PostConstruct;
 public class ApiKeyMachineSpecRedemptionMapper {
 
     private final JdbcTemplate jdbcTemplate;
+    private final SetupMarkerService setupMarkerService;
 
-    public ApiKeyMachineSpecRedemptionMapper(JdbcTemplate jdbcTemplate) {
+    public ApiKeyMachineSpecRedemptionMapper(JdbcTemplate jdbcTemplate, SetupMarkerService setupMarkerService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.setupMarkerService = setupMarkerService;
     }
 
     @PostConstruct
     public void initSchema() {
+        if (!setupMarkerService.isBusinessDatabaseReady()) {
+            return;
+        }
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS api_key_machine_spec_redemption (" +
                 "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
                 "api_key_id BIGINT NOT NULL," +

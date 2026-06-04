@@ -204,61 +204,9 @@
         </div>
         <div class="modal-body">
           <div class="card-codes-header">
-            <div class="card-codes-toolbar">
-            <div class="form-group inline">
-              <label>生成数量</label>
-              <input type="number" v-model="newCardCodeCount" min="1" max="100" placeholder="1-100" />
-            </div>
-            <div class="form-group inline">
-              <label>卡密类型</label>
-              <div class="custom-select-wrapper">
-                <select v-model="newCardCodeType" class="custom-select">
-                  <option value="time">时间卡密</option>
-                  <option value="count">次数卡密</option>
-                </select>
-                <div class="select-arrow">
-                  <i class="fas fa-chevron-down"></i>
-                </div>
-              </div>
-            </div>
-            <div class="form-group inline">
-              <label>{{ newCardCodeType === 'time' ? '有效期（天）' : '使用次数' }}</label>
-              <input type="number" v-model="newCardCodeValue" min="1" max="9999" :placeholder="newCardCodeType === 'time' ? '30' : '100'" />
-            </div>
-            <button class="btn-primary card-codes-generate-btn" @click="generateCardCodes">
-              <i class="fas fa-plus"></i>
+            <button type="button" class="btn-primary card-codes-generate-btn" @click="openExclusiveCreateModal">
               生成卡密
             </button>
-            </div>
-
-            <div class="stack-time-stack-group api-exclusive-stack" v-if="newCardCodeType === 'time'">
-              <div
-                class="stack-option-card"
-                :class="{ 'stack-option-card--active': newCardStackTime }"
-              >
-                <label class="stack-toggle-row">
-                  <span class="stack-switch">
-                    <input
-                      type="checkbox"
-                      v-model="newCardStackTime"
-                      class="stack-switch-input"
-                    />
-                    <span class="stack-switch-track">
-                      <span class="stack-switch-thumb"></span>
-                    </span>
-                  </span>
-                  <span class="stack-toggle-copy">
-                    <span class="stack-toggle-title">
-                      同机时长叠加（续期）
-                      <span v-if="newCardStackTime" class="stack-toggle-pill">已开启</span>
-                    </span>
-                    <span class="stack-toggle-desc">
-                      同一机器码上若已有未过期时间卡，激活本卡时将天数累加到原卡到期时间（本卡标记为「已合并」）；关闭则每次仍从激活时刻重新起算。
-                    </span>
-                  </span>
-                </label>
-              </div>
-            </div>
           </div>
           
           <div class="card-codes-list">
@@ -266,6 +214,9 @@
               <div class="card-code-info">
                 <code class="card-code-value">{{ cardCode.code }}</code>
                 <div class="card-code-meta">
+                  <span class="type-badge encrypt-badge" :class="cardCode.storage_type === 'simple' ? 'simple' : 'encrypted'">
+                    {{ cardCode.storage_type === 'simple' ? '简单' : '加密' }}
+                  </span>
                   <span class="type-badge">{{ cardCode.type }} ({{ cardCode.value }})</span>
                   <span class="status" :class="cardCode.status">{{ getCardCodeStatusText(cardCode.status) }}</span>
                   <span class="expiry" v-if="cardCode.expiryDate">到期: {{ formatDate(cardCode.expiryDate) }}</span>
@@ -281,7 +232,7 @@
                   <i class="fas fa-lock"></i>
                   加密复制
                 </button>
-                <button class="btn-danger small" @click="deleteCardCode(cardCode.id)" v-if="cardCode.status === 'unused'">
+                <button class="btn-danger small" @click="deleteCardCode(cardCode)" v-if="cardCode.status === 'unused'">
                   <i class="fas fa-trash"></i>
                   删除
                 </button>
@@ -293,6 +244,140 @@
               <p>暂无专属卡密，点击上方按钮生成</p>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 专属卡密：生成弹窗（加密 / 简单） -->
+    <div v-if="showExclusiveCreateModal" class="modal-overlay" @click="showExclusiveCreateModal = false">
+      <div
+        class="modal-content create-key-modal"
+        :class="{ 'create-key-modal--simple': !exclusiveNewKey.use_encrypted }"
+        @click.stop
+      >
+        <div class="modal-header">
+          <h3>生成专属卡密</h3>
+          <button type="button" class="close-btn" @click="showExclusiveCreateModal = false">×</button>
+        </div>
+        <div class="modal-body create-key-modal-body">
+          <p class="exclusive-create-hint">卡密将绑定到当前 API 密钥：{{ currentApiKey.name }}</p>
+          <div class="create-form-layout" :class="{ 'is-simple': !exclusiveNewKey.use_encrypted }">
+            <div class="create-form-col create-form-col--fields">
+              <div class="form-row form-row-2">
+                <div class="form-group form-group-compact">
+                  <label>卡密形式</label>
+                  <select v-model="exclusiveNewKey.use_encrypted">
+                    <option :value="true">加密卡密（高级）</option>
+                    <option :value="false">简单卡密（明文）</option>
+                  </select>
+                </div>
+                <div class="form-group form-group-compact">
+                  <label>卡密类型</label>
+                  <select v-model="exclusiveNewKey.card_type">
+                    <option value="time">时间卡密</option>
+                    <option value="count">次数卡密</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row" :class="exclusiveNewKey.use_encrypted ? 'form-row-2' : 'form-row-3'">
+                <div v-if="!exclusiveNewKey.use_encrypted" class="form-group form-group-compact">
+                  <label>卡密长度</label>
+                  <input
+                    type="number"
+                    v-model.number="exclusiveNewKey.key_length"
+                    min="4"
+                    max="128"
+                    :disabled="exclusiveNewKey.manual_mode"
+                  />
+                </div>
+                <div class="form-group form-group-compact">
+                  <label>生成数量</label>
+                  <input
+                    type="number"
+                    v-model.number="exclusiveNewKey.count"
+                    min="1"
+                    max="100"
+                    :disabled="!exclusiveNewKey.use_encrypted && exclusiveNewKey.manual_mode"
+                  />
+                </div>
+                <div v-if="exclusiveNewKey.card_type === 'time'" class="form-group form-group-compact">
+                  <label>持续天数</label>
+                  <input type="number" v-model.number="exclusiveNewKey.duration" min="1" max="365" />
+                </div>
+                <div v-if="exclusiveNewKey.card_type === 'count'" class="form-group form-group-compact">
+                  <label>总次数</label>
+                  <input type="number" v-model.number="exclusiveNewKey.total_count" min="1" max="10000" />
+                </div>
+              </div>
+              <div v-if="exclusiveNewKey.card_type === 'time'" class="form-group form-group-compact">
+                <label>允许重复验证</label>
+                <select v-model="exclusiveNewKey.allow_reverify">
+                  <option :value="1">允许</option>
+                  <option :value="0">不允许</option>
+                </select>
+              </div>
+            </div>
+            <div class="create-form-col create-form-col--options">
+              <div v-if="!exclusiveNewKey.use_encrypted" class="form-group stack-time-stack-group stack-time-stack-group--compact">
+                <div class="stack-option-card stack-option-card--compact" :class="{ 'stack-option-card--active': exclusiveNewKey.manual_mode }">
+                  <label class="stack-toggle-row">
+                    <span class="stack-switch stack-switch--sm">
+                      <input type="checkbox" v-model="exclusiveNewKey.manual_mode" class="stack-switch-input" />
+                      <span class="stack-switch-track"><span class="stack-switch-thumb"></span></span>
+                    </span>
+                    <span class="stack-toggle-copy">
+                      <span class="stack-toggle-title">手动输入卡密</span>
+                      <span class="stack-toggle-desc">按生成数量逐行填写；关闭则随机生成。</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+              <div v-if="exclusiveNewKey.card_type === 'time'" class="form-group stack-time-stack-group stack-time-stack-group--compact">
+                <div class="stack-option-card stack-option-card--compact" :class="{ 'stack-option-card--active': exclusiveNewKey.stack_time_if_same_machine }">
+                  <label class="stack-toggle-row">
+                    <span class="stack-switch stack-switch--sm">
+                      <input type="checkbox" v-model="exclusiveNewKey.stack_time_if_same_machine" class="stack-switch-input" />
+                      <span class="stack-switch-track"><span class="stack-switch-thumb"></span></span>
+                    </span>
+                    <span class="stack-toggle-copy">
+                      <span class="stack-toggle-title">同机时长叠加（续期）</span>
+                      <span class="stack-toggle-desc">续期时累加到原卡到期时间。</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+              <div class="form-group stack-time-stack-group stack-time-stack-group--compact">
+                <div class="stack-option-card stack-option-card--compact" :class="{ 'stack-option-card--active': exclusiveNewKey.allow_self_unbind }">
+                  <label class="stack-toggle-row">
+                    <span class="stack-switch stack-switch--sm">
+                      <input type="checkbox" v-model="exclusiveNewKey.allow_self_unbind" class="stack-switch-input" />
+                      <span class="stack-switch-track"><span class="stack-switch-thumb"></span></span>
+                    </span>
+                    <span class="stack-toggle-copy">
+                      <span class="stack-toggle-title">允许自助解绑</span>
+                      <span class="stack-toggle-desc">用户可在首页自行解绑机器码。</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-if="!exclusiveNewKey.use_encrypted && exclusiveNewKey.manual_mode" class="form-group form-group-compact create-form-full">
+            <label>卡密内容（每行一条，共 {{ exclusiveNewKey.count }} 条）</label>
+            <textarea
+              v-model="exclusiveNewKey.manual_keys_text"
+              rows="4"
+              class="manual-keys-textarea"
+              placeholder="例如：&#10;VIP2026-A&#10;VIP2026-B"
+              spellcheck="false"
+            />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" @click="showExclusiveCreateModal = false">取消</button>
+          <button type="button" class="btn-primary" :disabled="exclusiveCreating" @click="confirmExclusiveCreateCards">
+            {{ exclusiveCreating ? '生成中...' : '确认生成' }}
+          </button>
         </div>
       </div>
     </div>
@@ -799,13 +884,25 @@ const showUseCardCodeModal = ref(false)
 const selectedUseCardExampleId = ref(API_USE_CARD_EXAMPLES[0]?.id ?? 'curl')
 const showInterfaceModal = ref(false)
 const showCardCodesModal = ref(false)
+const showExclusiveCreateModal = ref(false)
+const exclusiveCreating = ref(false)
 const showUsersModal = ref(false)
 const currentApiKey = ref({})
 const selectedUserId = ref('')
-const newCardCodeCount = ref(10)
-const newCardCodeType = ref('time')
-const newCardCodeValue = ref(30) // duration or count
-const newCardStackTime = ref(false)
+
+const exclusiveNewKey = reactive({
+  use_encrypted: true,
+  card_type: 'time',
+  count: 10,
+  duration: 30,
+  total_count: 100,
+  key_length: 16,
+  manual_mode: false,
+  manual_keys_text: '',
+  allow_reverify: 1,
+  stack_time_if_same_machine: false,
+  allow_self_unbind: false
+})
 
 /** 接口回调设置 — 右下角可拖动/缩放/全屏的说明面板 */
 const interfaceDocVisible = ref(false)
@@ -1233,7 +1330,8 @@ const fetchCardCodes = async (apiKeyId) => {
     const cards = res.data.map(c => ({
        id: c.id,
        code: c.card_key,
-       status: c.status === 0 ? 'unused' : 'used', // 0: 未使用, 1: 已使用 (时间卡即使激活也是1)
+       storage_type: c.storage_type || 'encrypted',
+       status: c.status === 0 ? 'unused' : 'used',
        expiryDate: c.expire_time,
        type: c.card_type === 'time' ? '时间卡' : '次数卡',
        value: c.card_type === 'time' ? `${c.duration}天` : `${c.total_count}次`,
@@ -1256,31 +1354,78 @@ const fetchCardCodes = async (apiKeyId) => {
   }
 }
 
-const generateCardCodes = async () => {
-  if (!currentApiKey.value.id) return
-  
+const openExclusiveCreateModal = () => {
+  if (!currentApiKey.value?.id) return
+  showExclusiveCreateModal.value = true
+}
+
+const resetExclusiveNewKeyForm = () => {
+  exclusiveNewKey.use_encrypted = true
+  exclusiveNewKey.card_type = 'time'
+  exclusiveNewKey.count = 10
+  exclusiveNewKey.duration = 30
+  exclusiveNewKey.total_count = 100
+  exclusiveNewKey.key_length = 16
+  exclusiveNewKey.manual_mode = false
+  exclusiveNewKey.manual_keys_text = ''
+  exclusiveNewKey.allow_reverify = 1
+  exclusiveNewKey.stack_time_if_same_machine = false
+  exclusiveNewKey.allow_self_unbind = false
+}
+
+const confirmExclusiveCreateCards = async () => {
+  if (!currentApiKey.value?.id) return
+
+  const payload = {
+    count: exclusiveNewKey.count,
+    card_type: exclusiveNewKey.card_type,
+    duration: exclusiveNewKey.card_type === 'time' ? exclusiveNewKey.duration : 0,
+    total_count: exclusiveNewKey.card_type === 'count' ? exclusiveNewKey.total_count : 0,
+    verify_method: 'web',
+    allow_reverify: exclusiveNewKey.card_type === 'time' ? Number(exclusiveNewKey.allow_reverify) : 1,
+    api_key_id: currentApiKey.value.id,
+    stack_time_if_same_machine: exclusiveNewKey.card_type === 'time' && exclusiveNewKey.stack_time_if_same_machine,
+    allow_self_unbind: exclusiveNewKey.allow_self_unbind,
+    use_encrypted: exclusiveNewKey.use_encrypted
+  }
+
+  if (exclusiveNewKey.use_encrypted) {
+    payload.encryption_type = 'advanced'
+  } else {
+    payload.key_length = exclusiveNewKey.key_length
+    if (exclusiveNewKey.manual_mode) {
+      const lines = (exclusiveNewKey.manual_keys_text || '')
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      if (lines.length !== Number(exclusiveNewKey.count)) {
+        ElMessage.warning(`手动卡密须 ${exclusiveNewKey.count} 行，当前 ${lines.length} 行`)
+        return
+      }
+      payload.manual_card_keys = lines
+    }
+  }
+
+  exclusiveCreating.value = true
   try {
-    const res = await cardApi.createCards({
-      count: newCardCodeCount.value,
-      card_type: newCardCodeType.value,
-      duration: newCardCodeType.value === 'time' ? newCardCodeValue.value : 0,
-      total_count: newCardCodeType.value === 'count' ? newCardCodeValue.value : 0,
-      verify_method: 'web',
-      encryption_type: 'advanced',
-      allow_reverify: 1,
-      api_key_id: currentApiKey.value.id,
-      stack_time_if_same_machine: newCardCodeType.value === 'time' && newCardStackTime.value
-    })
-    
-    ElMessage.success(`成功生成 ${res.data.length} 个卡密`)
-    await fetchCardCodes(currentApiKey.value.id)
+    const res = await cardApi.createCards(payload)
+    if (res.success) {
+      ElMessage.success(`成功生成 ${res.data?.length ?? exclusiveNewKey.count} 个专属卡密`)
+      showExclusiveCreateModal.value = false
+      resetExclusiveNewKeyForm()
+      await fetchCardCodes(currentApiKey.value.id)
+    } else {
+      ElMessage.error(res.message || '生成卡密失败')
+    }
   } catch (error) {
     console.error('Generate cards failed:', error)
-    ElMessage.error('生成卡密失败')
+    ElMessage.error(error.message || '生成卡密失败')
+  } finally {
+    exclusiveCreating.value = false
   }
 }
 
-const deleteCardCode = async (cardId) => {
+const deleteCardCode = async (cardCode) => {
   try {
     await ElMessageBox.confirm('确定要删除这个卡密吗？此操作不可恢复！', '确认删除', {
       confirmButtonText: '确定',
@@ -1288,7 +1433,7 @@ const deleteCardCode = async (cardId) => {
       type: 'warning'
     })
     
-    const result = await cardApi.deleteCard(cardId)
+    const result = await cardApi.deleteCard(cardCode.id, cardCode.storage_type || 'encrypted')
     if (result.success) {
       ElMessage.success('卡密删除成功')
       // Refresh list
@@ -2369,11 +2514,26 @@ const copyPreviewUrl = async () => {
 /* 卡密管理样式 */
 .card-codes-header {
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
+  justify-content: flex-start;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
   border-bottom: 1px solid #e9ecef;
+}
+
+.exclusive-create-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.encrypt-badge.encrypted {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.encrypt-badge.simple {
+  background: #ecfdf5;
+  color: #047857;
 }
 
 .card-codes-toolbar {
@@ -3346,5 +3506,140 @@ input:checked + .slider:before {
   cursor: nwse-resize;
   background: linear-gradient(135deg, transparent 50%, #cbd5e1 50%, #cbd5e1 55%, transparent 55%, transparent 65%, #cbd5e1 65%, #cbd5e1 70%, transparent 70%);
   opacity: 0.85;
+}
+
+/* 专属卡密生成弹窗（与卡密管理页一致） */
+.create-key-modal {
+  max-width: 640px;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.create-key-modal.create-key-modal--simple {
+  max-width: 720px;
+}
+
+.create-key-modal-body {
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.create-form-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 0.75rem 1rem;
+  align-items: start;
+}
+
+.create-form-col--fields .form-row {
+  display: grid;
+  gap: 0.5rem 0.65rem;
+  margin-bottom: 0.5rem;
+}
+
+.form-row-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.form-row-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.form-group-compact {
+  margin-bottom: 0.5rem;
+}
+
+.form-group-compact label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.form-group-compact input,
+.form-group-compact select,
+.form-group-compact textarea {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.8125rem;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  box-sizing: border-box;
+}
+
+.manual-keys-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 4.5rem;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  font-family: inherit;
+}
+
+.create-form-full {
+  margin-top: 0.65rem;
+  margin-bottom: 0;
+}
+
+.stack-time-stack-group--compact {
+  margin-bottom: 0.5rem;
+}
+
+.stack-option-card--compact {
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+}
+
+.stack-option-card--compact .stack-toggle-desc {
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.stack-option-card--compact .stack-toggle-title {
+  font-size: 0.8125rem;
+}
+
+.stack-switch--sm {
+  width: 40px;
+  height: 24px;
+  margin-top: 1px;
+}
+
+.stack-switch--sm .stack-switch-thumb {
+  width: 18px;
+  height: 18px;
+  top: 3px;
+  left: 3px;
+}
+
+.stack-switch--sm .stack-switch-input:checked + .stack-switch-track .stack-switch-thumb {
+  transform: translateX(16px);
+}
+
+.create-key-modal .modal-header {
+  padding: 0.85rem 1.25rem 0;
+  flex-shrink: 0;
+}
+
+.create-key-modal .modal-actions {
+  flex-shrink: 0;
+  padding: 0 1.25rem 1rem;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .create-form-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .form-row-3 {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 </style>

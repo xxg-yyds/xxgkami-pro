@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 import org.xxg.backend.backend.entity.MaintenanceSettings;
+import org.xxg.backend.backend.service.SetupMarkerService;
 
 import jakarta.annotation.PostConstruct;
 import java.sql.ResultSet;
@@ -17,8 +18,14 @@ public class MaintenanceMapper {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private SetupMarkerService setupMarkerService;
+
     @PostConstruct
     public void initTable() {
+        if (!setupMarkerService.isBusinessDatabaseReady()) {
+            return;
+        }
         String sql = "CREATE TABLE IF NOT EXISTS system_maintenance (" +
                 "id INT PRIMARY KEY, " +
                 "enabled BOOLEAN DEFAULT FALSE, " +

@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.xxg.backend.backend.service.SetupMarkerService;
 
 import jakarta.annotation.PostConstruct;
 import javax.sql.DataSource;
@@ -14,8 +15,14 @@ public class DatabaseInitializer {
     @Autowired
     private DataSource dataSource;
 
+    @Autowired
+    private SetupMarkerService setupMarkerService;
+
     @PostConstruct
     public void init() {
+        if (!setupMarkerService.isBusinessDatabaseReady()) {
+            return;
+        }
         try {
             ResourceDatabasePopulator resourceDatabasePopulator = new ResourceDatabasePopulator(false, false, "UTF-8", new ClassPathResource("schema-advanced.sql"));
             resourceDatabasePopulator.setContinueOnError(true);

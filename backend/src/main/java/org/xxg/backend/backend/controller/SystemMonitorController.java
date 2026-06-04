@@ -1,11 +1,15 @@
 package org.xxg.backend.backend.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.xxg.backend.backend.service.RemoteUpdateService;
 import org.xxg.backend.backend.service.SystemMonitorService;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 系统监控控制器
@@ -16,6 +20,9 @@ public class SystemMonitorController {
 
     @Autowired
     private SystemMonitorService systemMonitorService;
+
+    @Autowired
+    private RemoteUpdateService remoteUpdateService;
 
     /**
      * 获取数据库状态信息
@@ -88,15 +95,15 @@ public class SystemMonitorController {
     @GetMapping("/check-update")
     public ResponseEntity<?> checkUpdate() {
         try {
-            String url = "https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro/raw/master/public/version.json";
-            org.springframework.web.client.RestTemplate restTemplate = new org.springframework.web.client.RestTemplate();
-            String result = restTemplate.getForObject(url, String.class);
-            // Parse JSON manually or return string directly. 
-            // Since we need to return JSON, returning string with proper content type or parsing it is fine.
-            // Let's return the raw string, but set content type to application/json
-            return ResponseEntity.ok()
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                .body(result);
+            Optional<RemoteUpdateService.FetchedVersion> fetched = remoteUpdateService.fetchBestRemoteVersionJson();
+            if (fetched.isEmpty()) {
+                return ResponseEntity.internalServerError().body(Map.of("error", "检查更新失败：无法获取远程版本信息"));
+            }
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("X-Update-Channel", fetched.get().jsonSource().name().toLowerCase());
+            headers.set("X-Update-Version-Url", remoteUpdateService.versionJsonUrl(fetched.get().jsonSource()));
+            return ResponseEntity.ok().headers(headers).body(fetched.get().json());
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", "检查更新失败: " + e.getMessage()));
         }

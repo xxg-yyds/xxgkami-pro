@@ -13,13 +13,18 @@
 
 **🔥 采用最新技术栈重构，性能提升300%，用户体验全面升级！**
 
-[🌟 立即体验](https://xiaoxiaoguai-yyds.github.io/web.xxgkami.github.io) · [📖 查看文档](#使用文档) · [🐛 反馈问题](https://github.com/xiaoxiaoguai-yyds/xxgkami-pro/issues) · [💬 加入讨论](https://github.com/xiaoxiaoguai-yyds/xxgkami-pro/discussions)
+🏠 [官方网站](https://www.xxgkami.com/) · 📖 [官网文档](https://doc.xxgkami.com/) · 🌟 [官方体验](https://demo.xxgkami.com/)
+
+[🌟 立即体验](https://demo.xxgkami.com/) · [📖 部署指南](#-快速部署指南) · [🐛 反馈问题](https://github.com/xxg-yyds/xxgkami-pro/issues) · [💬 加入讨论](https://github.com/xxg-yyds/xxgkami-pro/discussions)
 
 </div>
 
+> ⚠️ **仓库迁移说明**：旧版 GitHub 发布地址 [xiaoxiaoguai-yyds/xxgkami-pro](https://github.com/xiaoxiaoguai-yyds/xxgkami-pro) **已失效**，请勿再从此仓库拉取安装脚本或 Releases。  
+> 当前**新版本**仓库与发布地址：[**xxg-yyds/xxgkami-pro**](https://github.com/xxg-yyds/xxgkami-pro) · [Releases 下载页](https://github.com/xxg-yyds/xxgkami-pro/releases)
+
 ---
 
-## � 快速部署指南
+## 📦 快速部署指南
 
 本项目提供四种灵活的部署方式，满足不同场景的需求。
 
@@ -34,7 +39,7 @@ curl -O https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro/raw/master/install.sh &&
 
 **海外服务器（GitHub 源）：**
 ```bash
-curl -O https://raw.githubusercontent.com/xiaoxiaoguai-yyds/xxgkami-pro/refs/heads/master/install.sh && chmod +x install.sh && sudo ./install.sh
+curl -O https://raw.githubusercontent.com/xxg-yyds/xxgkami-pro/refs/heads/master/install.sh && chmod +x install.sh && sudo ./install.sh
 ```
 
 **脚本功能：**
@@ -45,20 +50,44 @@ curl -O https://raw.githubusercontent.com/xiaoxiaoguai-yyds/xxgkami-pro/refs/hea
 
 ---
 
-### 方式二：Docker 容器化部署 (即将上线 🚧)
+### 方式二：本地文件部署（编译版）
 
-适用于熟悉 Docker 的用户，环境隔离，快速启动。
+适用于无法在服务器上编译、或希望直接上传制品快速上线的场景（Linux 服务器 + Nginx，不依赖宝塔面板亦可）。
 
-> ⚠️ **注意**：Docker 镜像构建流程正在优化中，敬请期待！
+#### 1. 获取部署文件
 
-1. **安装 Docker & Docker Compose**
-2. **下载 docker-compose.yml**
-3. **启动服务**
+编译制品（如 `backend.jar`、`dist.zip` 等）可通过以下渠道获取：
 
-```bash
-# 即将支持
-# docker-compose up -d
-```
+| 渠道 | 说明 |
+|------|------|
+| **GitHub Releases** | [https://github.com/xxg-yyds/xxgkami-pro/releases](https://github.com/xxg-yyds/xxgkami-pro/releases) 下载最新发布包 |
+| **GitHub 仓库** | [https://github.com/xxg-yyds/xxgkami-pro](https://github.com/xxg-yyds/xxgkami-pro) 查看源码与仓库内附带文件 |
+| **官方 QQ 群** | 群号 `1050160397`，群内可获取最新编译包与部署答疑 |
+
+<a target="_blank" href="https://qm.qq.com/cgi-bin/qm/qr?k=CuHJ-5Rf6uW94FT7ogPCodTjAghwBl0C&jump_from=webapi&authKey=GkL+FpvNF54Wko1C+gVqqiONrrYnpTCka5uKQyFHboOc9hZUVa9eeCMWqyFUyIob"><img border="0" src="https://pub.idqqimg.com/wpa/images/group.png" alt="小小怪卡密" title="小小怪卡密"></a>
+
+#### 2. 环境准备
+
+- JDK 20+
+- MySQL 8.0+
+- Nginx
+
+#### 3. 部署步骤
+
+1. **数据库**：导入 `kami.sql`（或按安装文档初始化），在 `application.properties` 中配置数据库连接。
+2. **后端**：上传 `backend.jar` 至服务器，执行：
+   ```bash
+   nohup java -jar backend.jar > backend.log 2>&1 &
+   ```
+   默认监听 `8080`，上下文路径为 `/api`。
+3. **前端**：将 `dist.zip` 解压到网站根目录（如 `/www/wwwroot/your-domain/`）。
+4. **Nginx**：配置静态站点，并将 API 反向代理到后端（**注意** `proxy_pass` 末尾不要多加 `/`，以免去掉 `/api` 前缀）：
+   ```nginx
+   location /api {
+       proxy_pass http://127.0.0.1:8080;
+   }
+   ```
+   可参考仓库内 [deployment/nginx.conf](deployment/nginx.conf) 与 [deployment/README.md](deployment/README.md)。
 
 ---
 
@@ -66,7 +95,7 @@ curl -O https://raw.githubusercontent.com/xiaoxiaoguai-yyds/xxgkami-pro/refs/hea
 
 适用于已有宝塔面板的服务器，使用编译好的制品快速部署。
 
-1. **下载编译制品**：从 [Releases](https://github.com/xiaoxiaoguai-yyds/xxgkami-pro/releases) 下载最新的 `backend.jar` 和 `dist.zip`。
+1. **下载编译制品**：从 [Releases](https://github.com/xxg-yyds/xxgkami-pro/releases) 下载最新的 `backend.jar` 和 `dist.zip`。
 2. **后端部署**：
    - 在宝塔“Java项目”中添加项目。
    - 上传 `backend.jar`，选择 JDK 20。
@@ -91,7 +120,7 @@ curl -O https://raw.githubusercontent.com/xiaoxiaoguai-yyds/xxgkami-pro/refs/hea
 
 1. **克隆代码**
    ```bash
-   git clone https://github.com/xiaoxiaoguai-yyds/xxgkami-pro.git
+   git clone https://github.com/xxg-yyds/xxgkami-pro.git
    cd xxgkami-pro
    ```
 
@@ -226,8 +255,8 @@ curl -O https://raw.githubusercontent.com/xiaoxiaoguai-yyds/xxgkami-pro/refs/hea
 ### 🏆 **贡献者排行榜**
 感谢所有为项目做出贡献的开发者！
 
-<a href="https://github.com/xiaoxiaoguai-yyds/xxgkami-pro/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=xiaoxiaoguai-yyds/xxgkami-pro" />
+<a href="https://github.com/xxg-yyds/xxgkami-pro/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=xxg-yyds/xxgkami-pro" />
 </a>
 
 ---
@@ -252,22 +281,24 @@ curl -O https://raw.githubusercontent.com/xiaoxiaoguai-yyds/xxgkami-pro/refs/hea
 ## 📞 联系我们
 
 ### 💬 **社区交流**
-- 🐛 [问题反馈](https://github.com/xiaoxiaoguai-yyds/xxgkami-pro/issues)
-- 💡 [功能建议](https://github.com/xiaoxiaoguai-yyds/xxgkami-pro/discussions)
-- � **官方交流群**：`1050160397` (售后/技术支持)
-- �📧 **联系邮箱**：`xxgyyds@vip.qq.com`
+- 🐛 [问题反馈](https://github.com/xxg-yyds/xxgkami-pro/issues)
+- 💡 [功能建议](https://github.com/xxg-yyds/xxgkami-pro/discussions)
+- 💬 **官方交流群**：`1050160397`（售后 / 技术支持）  
+  <a target="_blank" href="https://qm.qq.com/cgi-bin/qm/qr?k=CuHJ-5Rf6uW94FT7ogPCodTjAghwBl0C&jump_from=webapi&authKey=GkL+FpvNF54Wko1C+gVqqiONrrYnpTCka5uKQyFHboOc9hZUVa9eeCMWqyFUyIob"><img border="0" src="https://pub.idqqimg.com/wpa/images/group.png" alt="小小怪卡密" title="小小怪卡密"></a>
+- 📧 **联系邮箱**：`xxgyyds@vip.qq.com`
 
 ### 🌐 **开源地址**
-- 🐙 **GitHub**: [https://github.com/xiaoxiaoguai-yyds/xxgkami-pro](https://github.com/xiaoxiaoguai-yyds/xxgkami-pro)
+- 🐙 **GitHub**: [https://github.com/xxg-yyds/xxgkami-pro](https://github.com/xxg-yyds/xxgkami-pro)
 - 🔴 **Gitee**: [https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro](https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro)
-- 🚀 **GitCode**: [https://atomgit.com/xiaoxiaoguai-yyds/xxgkami-pro](https://atomgit.com/xiaoxiaoguai-yyds/xxgkami-pro)
+- 🚀 **GitCode**: [https://atomgit.com/xxg-yyds/xxgkami-pro](https://atomgit.com/xxg-yyds/xxgkami-pro)
 
 ### 🌐 **官方链接**
-- 🏠 [官方网站](https://xiaoxiaoguai-yyds.github.io/xxgkami.github.io/index.html)
-- 📖 [在线文档](https://xiaoxiaoguai-yyds.github.io/xxgkami.github.io/)
-- 🐱 [GitHub 仓库](https://github.com/xiaoxiaoguai-yyds/xxgkami-pro)
+- 🏠 [官方网站](https://www.xxgkami.com/)
+- 📖 [官网文档](https://doc.xxgkami.com/)
+- 🌟 [官方体验](https://demo.xxgkami.com/)
+- 🐱 [GitHub 仓库](https://github.com/xxg-yyds/xxgkami-pro)
 - 🔴 [Gitee 仓库](https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro)
-- 🚀 [GitCode 仓库](https://atomgit.com/xiaoxiaoguai-yyds/xxgkami-pro)
+- 🚀 [GitCode 仓库](https://atomgit.com/xxg-yyds/xxgkami-pro)
 
 ---
 
@@ -279,7 +310,7 @@ curl -O https://raw.githubusercontent.com/xiaoxiaoguai-yyds/xxgkami-pro/refs/hea
 
 ## ⭐ Star 历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=xiaoxiaoguai-yyds/xxgkami-pro&type=Date)](https://star-history.com/#xiaoxiaoguai-yyds/xxgkami-pro&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=xxg-yyds/xxgkami-pro&type=Date)](https://star-history.com/#xxg-yyds/xxgkami-pro&Date)
 
 ---
 

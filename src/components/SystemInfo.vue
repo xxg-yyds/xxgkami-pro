@@ -20,7 +20,7 @@
               <el-button type="primary" link size="small" @click="checkUpdate" :loading="checking">检查更新</el-button>
             </div>
           </el-descriptions-item>
-          <el-descriptions-item label="发布时间">2026-05-06</el-descriptions-item>
+          <el-descriptions-item label="发布时间">2026-06-04</el-descriptions-item>
           <el-descriptions-item label="开发语言">Vue 3 + Spring Boot 3</el-descriptions-item>
           <el-descriptions-item label="官方网站">
             <a href="https://www.xxgkami.com" target="_blank" class="link">www.xxgkami.com</a>
@@ -44,7 +44,7 @@
             <a href="https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro" target="_blank" class="link">https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro</a>
           </el-descriptions-item>
           <el-descriptions-item label="GitHub">
-            <a href="https://github.com/xiaoxiaoguai-yyds/xxgkami-pro" target="_blank" class="link">https://github.com/xiaoxiaoguai-yyds/xxgkami-pro</a>
+            <a href="https://github.com/xxg-yyds/xxgkami-pro" target="_blank" class="link">https://github.com/xxg-yyds/xxgkami-pro</a>
           </el-descriptions-item>
           <el-descriptions-item label="AtomGit">
             <a href="https://atomgit.com/xiaoxiaoguai-yyds/xxgkami-pro" target="_blank" class="link">https://atomgit.com/xiaoxiaoguai-yyds/xxgkami-pro</a>
@@ -92,7 +92,27 @@
           </div>
         </template>
         <el-timeline>
-          <el-timeline-item timestamp="2026-05-06" placement="top" type="primary" size="large">
+          <el-timeline-item timestamp="2026-06-04" placement="top" type="primary" size="large">
+            <el-card>
+              <h4>v1.0.7 版本更新</h4>
+              <p>1. 新增在线更新：系统信息页可一键更新；自动探测后端 JAR 与前端 dist 路径，支持手动修改确认后下载 Release 制品并替换，完成后自动重启后端</p>
+              <p>2. version.json 新增 releaseDownloads（Gitee/GitHub 各含 dist.zip 与 backend JAR 下载地址，支持 {version} 占位符）</p>
+              <p>3. 检查更新优化：并行 ping gitee.com 与 github.com，优先使用先连通的通道拉取 version.json，并提示所用通道</p>
+              <p>4. 首次安装向导完善：检测 kami 库是否存在 admins 表；无 admins 视为未初始化业务库，自动执行全新导入（跳过「覆盖/智能更新」策略页）</p>
+              <p>5. 首次安装向导：选 MySQL 5.6 时由 kami.sql 自动转译为 5.6 兼容脚本并显示转译进度，无需单独维护 kami_mysql56.sql</p>
+              <p>6. 种子 SQL 内嵌 JAR：打包时纳入 databaes/kami.sql，部署仅上传 JAR 亦可安装；支持解压到 data/.xxgkami-seed 及自定义 seed-sql-override</p>
+              <p>7. 安装/升级标记：以 data/.xxgkami-setup.complete 与 admins 表共同判定业务库就绪；未完成前跳过业务 JDBC 探测与 ApiKey 等初始化，避免空库报错</p>
+              <p>8. Spring Session：使用 spring_session 表名，启动时初始化会话表；修复 SPRING_SESSION 相关启动与清理错误</p>
+              <p>9. 新版升级检测：业务库就绪后按 data/.xxgkami-version.json 与远程版本比对，支持智能合并更新与版本升级向导</p>
+              <p>10. 引导页与加载页 UI：logo 蒙版渐隐背景；系统初始化向导支持版本升级模式与 5.6 SQL 转译进度展示</p>
+              <p>11. 卡密管理列表：缩短卡密列显示宽度；新增 IP 列（有 ip_address 显示 IP，否则显示「未绑定」）</p>
+              <p>12. 修复 MySQL 5.6 转译时 replaceAll「${1}」触发 Java 命名捕获组告警，改为安全替换逻辑</p>
+              <p>13. 修复宝塔等仅部署 JAR 环境提示「未找到 databaes/kami.sql」导致安装卡在 0% 的问题</p>
+              <p>14. 修复首次启动 Spring Session 等自动建表导致向导误报「库已存在需覆盖/合并」的问题</p>
+              <p>15. 远程 version.json Gitee 源地址调整为 xiaoxiaoguai-yyds/xxgkami-pro，与 Release 下载仓库一致</p>
+            </el-card>
+          </el-timeline-item>
+          <el-timeline-item timestamp="2026-05-06" placement="top" size="large">
             <el-card>
               <h4>v1.0.6 版本更新</h4>
               <p>1. 新增 API 密钥管理页「代码实例」入口（位于「接口文档」左侧），便于快速查阅核销接口调用方式</p>
@@ -175,51 +195,283 @@
     </div>
 
     <!-- 更新提示弹窗 -->
-    <el-dialog v-model="showUpdateDialog" title="发现新版本" width="500px">
-      <div v-if="updateInfo">
-        <div class="new-version">最新版本: v{{ updateInfo.version }}</div>
-        <div class="update-date">发布时间: {{ updateInfo.buildDate }}</div>
-        <div class="changelog-title">更新内容:</div>
-        <ul class="changelog-list">
-          <li v-for="(item, index) in updateInfo.changelog" :key="index">{{ item }}</li>
-        </ul>
-        
-        <div v-if="updateInfo.updateScripts" class="update-scripts">
-          <div class="script-block">
-            <div class="script-header">
-              <span>国内更新脚本</span>
-              <el-button type="primary" link size="small" @click="copyScript(updateInfo.updateScripts.cn)">复制</el-button>
-            </div>
-            <div class="script-content">{{ updateInfo.updateScripts.cn }}</div>
+    <el-dialog
+      v-model="showUpdateDialog"
+      class="update-dialog"
+      width="560px"
+      align-center
+      destroy-on-close
+    >
+      <template #header>
+        <div class="update-dialog-header">
+          <div class="update-dialog-logo-wrap">
+            <img :src="brandLogo" alt="XXG-KAMI" class="update-dialog-logo" />
           </div>
-          <div class="script-block">
-            <div class="script-header">
-              <span>海外更新脚本</span>
-              <el-button type="primary" link size="small" @click="copyScript(updateInfo.updateScripts.global)">复制</el-button>
-            </div>
-            <div class="script-content">{{ updateInfo.updateScripts.global }}</div>
+          <div>
+            <h3 class="update-dialog-title">发现新版本</h3>
+            <p class="update-dialog-sub">建议尽快更新以获得最新功能与修复</p>
           </div>
         </div>
+      </template>
+      <div v-if="updateInfo" class="update-dialog-body">
+        <div class="version-compare">
+          <div class="version-pill version-pill--current">
+            <span class="version-pill-label">当前</span>
+            <span class="version-pill-value">{{ currentVersion }}</span>
+          </div>
+          <span class="version-arrow" aria-hidden="true">
+            <img :src="brandLogo" alt="" class="version-arrow-logo" />
+          </span>
+          <div class="version-pill version-pill--new">
+            <span class="version-pill-label">最新</span>
+            <span class="version-pill-value">v{{ updateInfo.version }}</span>
+          </div>
+        </div>
+        <p v-if="updateInfo.buildDate" class="update-meta">
+          <span>发布时间</span> {{ updateInfo.buildDate }}
+        </p>
+
+        <div v-if="changelogItems.length" class="changelog-panel">
+          <div class="panel-head">
+            <span>更新内容</span>
+            <span class="panel-count">共 {{ changelogItems.length }} 条</span>
+          </div>
+          <ul class="changelog-list">
+            <li v-for="(item, index) in visibleChangelogItems" :key="'v-' + index">{{ item }}</li>
+          </ul>
+          <button
+            v-if="changelogItems.length > changelogPreviewCount"
+            type="button"
+            class="changelog-toggle"
+            @click="changelogExpanded = !changelogExpanded"
+          >
+            {{ changelogExpanded ? '收起更新说明' : `展开全部（还有 ${changelogItems.length - changelogPreviewCount} 条）` }}
+          </button>
+        </div>
+
+        <el-collapse v-if="updateInfo.updateScripts" class="update-collapse">
+          <el-collapse-item title="命令行更新脚本（可选）" name="scripts">
+            <div class="script-block">
+              <div class="script-header">
+                <span>国内 · Gitee</span>
+                <el-button type="primary" link size="small" @click="copyScript(updateInfo.updateScripts.cn)">复制</el-button>
+              </div>
+              <div class="script-content">{{ updateInfo.updateScripts.cn }}</div>
+            </div>
+            <div class="script-block">
+              <div class="script-header">
+                <span>海外 · GitHub</span>
+                <el-button type="primary" link size="small" @click="copyScript(updateInfo.updateScripts.global)">复制</el-button>
+              </div>
+              <div class="script-content">{{ updateInfo.updateScripts.global }}</div>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
       </div>
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showUpdateDialog = false">关闭</el-button>
-          <el-button type="primary" @click="goToRepo">前往仓库</el-button>
-        </span>
+        <div class="update-dialog-footer">
+          <button type="button" class="update-action-btn update-action-btn--ghost" @click="showUpdateDialog = false">
+            稍后
+          </button>
+          <button type="button" class="update-action-btn update-action-btn--outline" @click="goToRepo">
+            <img :src="brandLogo" alt="" class="update-btn-logo" />
+            前往仓库
+          </button>
+          <button
+            v-if="hasNewerVersion"
+            type="button"
+            class="update-action-btn update-action-btn--brand"
+            @click="openOnlineUpdateDialog"
+          >
+            <img :src="brandLogo" alt="" class="update-btn-logo" />
+            在线更新
+          </button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 在线更新：路径确认 -->
+    <el-dialog
+      v-model="showOnlineUpdateDialog"
+      class="update-dialog update-dialog--online"
+      width="640px"
+      align-center
+      :close-on-click-modal="!updatingOnline"
+      destroy-on-close
+    >
+      <template #header>
+        <div class="update-dialog-header">
+          <div class="update-dialog-logo-wrap update-dialog-logo-wrap--online">
+            <img :src="brandLogo" alt="XXG-KAMI" class="update-dialog-logo" />
+          </div>
+          <div>
+            <h3 class="update-dialog-title">在线更新</h3>
+            <p v-if="updateInfo" class="update-dialog-sub">
+              将升级至 <strong>v{{ updateInfo.version }}</strong>，请确认路径后执行
+            </p>
+          </div>
+        </div>
+      </template>
+
+      <div class="online-update-body">
+        <div class="path-detect-bar">
+          <span>
+            优先扫描 <code>/www/wwwroot</code> 及站点子目录，匹配
+            <code>{{ updatePaths.defaultBackendJarName || 'backend-0.0.1-SNAPSHOT.jar' }}</code> /
+            <code>{{ updatePaths.defaultFrontendDirName || 'dist' }}</code>
+          </span>
+          <button
+            type="button"
+            class="update-link-btn"
+            :disabled="detectingPaths || updatingOnline"
+            @click="refreshUpdatePaths"
+          >
+            <img :src="brandLogo" alt="" class="update-link-btn-logo" />
+            {{ detectingPaths ? '检测中…' : '重新检测' }}
+          </button>
+        </div>
+
+        <div class="path-cards">
+          <div class="path-card" :class="{ 'is-invalid': updatePaths.jarExists === false }">
+            <div class="path-card-head">
+              <span class="path-card-title">后端 JAR</span>
+              <el-tag size="small" :type="updatePaths.jarExists ? 'success' : 'warning'">
+                {{ updatePaths.jarExists ? '已找到' : '未找到文件' }}
+              </el-tag>
+            </div>
+            <p v-if="updatePaths.backendJarMatchRule" class="path-match-hint">{{ updatePaths.backendJarMatchRule }}</p>
+            <el-input
+              v-model="updatePaths.backendJarPath"
+              :disabled="updatingOnline"
+              :placeholder="`匹配 ${updatePaths.defaultBackendJarName || 'backend-0.0.1-SNAPSHOT.jar'}`"
+            />
+          </div>
+          <div class="path-card" :class="{ 'is-invalid': !updatePaths.distExists }">
+            <div class="path-card-head">
+              <span class="path-card-title">前端 dist</span>
+              <el-tag size="small" :type="distStatusTagType">
+                {{ distStatusLabel }}
+              </el-tag>
+            </div>
+            <p v-if="updatePaths.frontendDistMatchRule" class="path-match-hint" :class="{ 'is-warn': !updatePaths.frontendDistDetected }">
+              {{ updatePaths.frontendDistMatchRule }}
+            </p>
+            <p v-if="!updatePaths.frontendDistDetected && updatePaths.distExists" class="path-match-hint is-ok">
+              目录存在且含 index.html，可手动确认后更新
+            </p>
+            <el-input
+              v-model="updatePaths.frontendDistPath"
+              :disabled="updatingOnline"
+              :placeholder="`匹配目录名 ${updatePaths.defaultFrontendDirName || 'dist'}（含 index.html）`"
+            />
+          </div>
+        </div>
+
+        <div class="path-meta-row">
+          <span>运行目录：{{ updatePaths.userDir || '—' }}</span>
+          <span v-if="updatePaths.channel">下载通道：{{ updatePaths.channel === 'github' ? 'GitHub' : 'Gitee' }}</span>
+        </div>
+
+        <div v-if="updatingOnline || onlineUpdateStatus" class="online-update-progress">
+          <el-progress :percentage="onlineUpdateStatus?.percent ?? 0" :status="progressStatus" :stroke-width="10" striped striped-flow />
+          <p class="progress-msg">{{ onlineUpdateStatus?.message || '准备中…' }}</p>
+          <el-alert
+            v-if="onlineUpdateStatus?.status === 'done'"
+            class="update-done-baota-hint"
+            type="warning"
+            :closable="false"
+            show-icon
+            title="更新已完成"
+            :description="onlineUpdateStatus?.baotaHint || BAOTA_RESTART_HINT"
+          />
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="update-dialog-footer">
+          <button
+            type="button"
+            class="update-action-btn update-action-btn--ghost"
+            :disabled="updatingOnline"
+            @click="showOnlineUpdateDialog = false"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="update-action-btn update-action-btn--brand"
+            :disabled="!canStartOnlineUpdate || updatingOnline"
+            @click="startOnlineUpdate"
+          >
+            <img :src="brandLogo" alt="" class="update-btn-logo" />
+            {{ updatingOnline ? '更新中…' : '确认并开始更新' }}
+          </button>
+        </div>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onUnmounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { copyToClipboard } from '../utils/clipboard.js'
+import { monitorApi } from '../services/api.js'
+import brandLogo from '../assets/icon.png'
 
-const currentVersion = 'v1.0.6'
+const currentVersion = 'v1.0.7'
 const checking = ref(false)
 const showUpdateDialog = ref(false)
 const updateInfo = ref(null)
+const hasNewerVersion = ref(false)
+const showOnlineUpdateDialog = ref(false)
+const detectingPaths = ref(false)
+const updatingOnline = ref(false)
+const changelogPreviewCount = 4
+const changelogExpanded = ref(false)
+const updatePaths = ref({
+  backendJarPath: '',
+  frontendDistPath: '',
+  userDir: '',
+  channel: '',
+  jarExists: false,
+  distExists: false,
+  defaultBackendJarName: 'backend-0.0.1-SNAPSHOT.jar',
+  defaultFrontendDirName: 'dist',
+  backendJarMatchRule: '',
+  frontendDistMatchRule: ''
+})
+const onlineUpdateStatus = ref(null)
+
+/** 在线更新完成后提示（宝塔权限可能导致无法自动拉起 Java） */
+const BAOTA_RESTART_HINT =
+  '若刷新后仍无法访问，可能因宝塔权限导致后端未能自动启动，请前往：宝塔 → 网站 → Java 项目，手动启动后端 JAR 文件。'
+let statusPollTimer = null
+
+const changelogItems = computed(() => {
+  const list = updateInfo.value?.changelog
+  return Array.isArray(list) ? list : []
+})
+
+const distStatusLabel = computed(() => {
+  if (updatePaths.value?.frontendDistDetected && updatePaths.value?.distExists) return '已找到'
+  if (updatePaths.value?.distExists) return '目录有效'
+  if (updatePaths.value?.frontendDistDetected) return '待确认'
+  return '未自动匹配'
+})
+
+const distStatusTagType = computed(() => {
+  if (updatePaths.value?.frontendDistDetected && updatePaths.value?.distExists) return 'success'
+  if (updatePaths.value?.distExists) return 'success'
+  return 'warning'
+})
+
+const visibleChangelogItems = computed(() => {
+  if (changelogExpanded.value || changelogItems.value.length <= changelogPreviewCount) {
+    return changelogItems.value
+  }
+  return changelogItems.value.slice(0, changelogPreviewCount)
+})
 
 const copyScript = async (text) => {
   const success = await copyToClipboard(text)
@@ -230,32 +482,163 @@ const copyScript = async (text) => {
   }
 }
 
+const compareVersions = (a, b) => {
+  const pa = (a || '0').replace(/^v/i, '').split('.')
+  const pb = (b || '0').replace(/^v/i, '').split('.')
+  const len = Math.max(pa.length, pb.length)
+  for (let i = 0; i < len; i++) {
+    const na = parseInt(pa[i] || '0', 10) || 0
+    const nb = parseInt(pb[i] || '0', 10) || 0
+    if (na !== nb) return na - nb
+  }
+  return 0
+}
+
+const progressStatus = computed(() => {
+  const st = onlineUpdateStatus.value?.status
+  if (st === 'error') return 'exception'
+  if (st === 'done') return 'success'
+  return undefined
+})
+
+const canStartOnlineUpdate = computed(() => {
+  return !!(updatePaths.value.backendJarPath?.trim() && updatePaths.value.frontendDistPath?.trim())
+})
+
+const stopStatusPoll = () => {
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer)
+    statusPollTimer = null
+  }
+}
+
+const pollUpdateStatus = () => {
+  stopStatusPoll()
+  statusPollTimer = setInterval(async () => {
+    try {
+      const res = await monitorApi.getOnlineUpdateStatus()
+      if (res.success && res.data) {
+        onlineUpdateStatus.value = res.data
+        if (res.data.status === 'done') {
+          stopStatusPoll()
+          updatingOnline.value = false
+          const hint = res.data.baotaHint || BAOTA_RESTART_HINT
+          ElMessage({
+            type: 'success',
+            duration: 12000,
+            showClose: true,
+            message: `${res.data.message || '更新完成，请刷新页面'} ${hint}`
+          })
+        } else if (res.data.status === 'error') {
+          stopStatusPoll()
+          updatingOnline.value = false
+          ElMessage.error(res.data.message || '在线更新失败')
+        }
+      }
+    } catch {
+      // 后端重启中，连接中断属正常
+    }
+  }, 2000)
+}
+
+const refreshUpdatePaths = async () => {
+  detectingPaths.value = true
+  try {
+    const res = await monitorApi.detectUpdatePaths()
+    if (res.success && res.data) {
+      updatePaths.value = {
+        ...updatePaths.value,
+        ...res.data,
+        channel: updatePaths.value.channel || res.data.channel || ''
+      }
+      if (res.data.detectError) {
+        ElMessage.warning(`路径自动检测部分失败：${res.data.detectError}，请核对默认路径`)
+      } else if (!res.data.frontendDistDetected) {
+        ElMessage.warning('未自动匹配到 dist，请填写含 index.html 的站点目录（宝塔多为 /www/wwwroot/域名/ ）')
+      } else if (!res.data.jarExists || !res.data.distExists) {
+        ElMessage.warning('部分路径无效，请核对是否存在 index.html')
+      }
+    } else {
+      ElMessage.error(res.message || '检测路径失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '检测路径失败')
+  } finally {
+    detectingPaths.value = false
+  }
+}
+
+const openOnlineUpdateDialog = async () => {
+  showOnlineUpdateDialog.value = true
+  onlineUpdateStatus.value = null
+  updatePaths.value.channel = ''
+  await refreshUpdatePaths()
+  try {
+    const chk = await monitorApi.checkUpdate()
+    updatePaths.value.channel = chk.channel || ''
+  } catch {
+    /* 通道信息可选 */
+  }
+}
+
+const startOnlineUpdate = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '将下载并覆盖后端 JAR 与前端 dist，随后自动重启后端服务。更新过程中请勿关闭服务器。是否继续？',
+      '确认在线更新',
+      { type: 'warning', confirmButtonText: '开始更新', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  updatingOnline.value = true
+  onlineUpdateStatus.value = { status: 'running', percent: 0, message: '正在启动…' }
+  try {
+    const res = await monitorApi.startOnlineUpdate({
+      backendJarPath: updatePaths.value.backendJarPath.trim(),
+      frontendDistPath: updatePaths.value.frontendDistPath.trim()
+    })
+    if (!res.success) {
+      throw new Error(res.message || '启动失败')
+    }
+    onlineUpdateStatus.value = res.data || { status: 'running', percent: 0, message: '更新中…' }
+    pollUpdateStatus()
+  } catch (e) {
+    updatingOnline.value = false
+    ElMessage.error(e.message || '在线更新失败')
+  }
+}
+
 const checkUpdate = async () => {
   checking.value = true
+  hasNewerVersion.value = false
   try {
-    // 使用相对路径调用接口，避免跨域和混合内容问题
-    // 浏览器会自动使用当前页面的协议和域名
-    const res = await fetch('/api/monitor/check-update')
-    if (!res.ok) throw new Error('检查更新失败')
-    
-    const data = await res.json()
+    const { data, channel } = await monitorApi.checkUpdate()
     const remoteVersion = data.version
-    
-    // 简单的版本比较逻辑：如果不相等则提示更新
-    // 实际项目中建议使用 semver 库进行版本号比较
-    if (remoteVersion !== currentVersion.replace('v', '')) {
+    const local = currentVersion.replace(/^v/i, '')
+    const channelLabel = channel === 'github' ? 'GitHub' : channel === 'gitee' ? 'Gitee' : ''
+
+    if (compareVersions(local, remoteVersion) < 0) {
       updateInfo.value = data
+      changelogExpanded.value = false
+      hasNewerVersion.value = true
       showUpdateDialog.value = true
+      if (channelLabel) {
+        ElMessage.info(`已通过 ${channelLabel} 通道获取版本信息`)
+      }
     } else {
-      ElMessage.success('当前已是最新版本')
+      const suffix = channelLabel ? `（${channelLabel} 通道）` : ''
+      ElMessage.success(`当前已是最新版本${suffix}`)
     }
   } catch (error) {
     console.error(error)
-    ElMessage.error('检查更新失败，请稍后重试')
+    ElMessage.error(error.message || '检查更新失败，请稍后重试')
   } finally {
     checking.value = false
   }
 }
+
+onUnmounted(() => stopStatusPoll())
 
 const goToRepo = () => {
   if (updateInfo.value && updateInfo.value.repoUrl) {
@@ -361,38 +744,300 @@ const goToRepo = () => {
   gap: 10px;
 }
 
-.new-version {
+:deep(.update-dialog .el-dialog__header) {
+  margin-right: 0;
+  padding-bottom: 0;
+}
+
+:deep(.update-dialog .el-dialog__body) {
+  padding-top: 12px;
+}
+
+.update-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.update-dialog-logo-wrap {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.update-dialog-logo-wrap--online {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.update-dialog-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  display: block;
+}
+
+.update-dialog-title {
+  margin: 0;
   font-size: 18px;
-  font-weight: bold;
-  color: #409EFF;
-  margin-bottom: 8px;
+  color: #1e293b;
 }
 
-.update-date {
-  color: #909399;
+.update-dialog-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.update-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.version-compare {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.version-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  min-width: 88px;
+}
+
+.version-pill--current {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+.version-pill--new {
+  background: #409eff;
+  color: #fff;
+  border: 1px solid #337ecc;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.28);
+}
+
+.version-pill-label {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.version-pill-value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.version-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+}
+
+.version-arrow-logo {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  opacity: 0.75;
+}
+
+.update-meta {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+  text-align: center;
+}
+
+.update-meta span {
+  color: #94a3b8;
+}
+
+.changelog-panel {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-weight: 600;
   font-size: 14px;
-  margin-bottom: 16px;
+  color: #334155;
 }
 
-.changelog-title {
-  font-weight: bold;
-  margin-bottom: 8px;
+.panel-count {
+  font-weight: 400;
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .changelog-list {
-  padding-left: 20px;
-  margin-bottom: 16px;
-  color: #606266;
+  padding-left: 18px;
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .changelog-list li {
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
-.update-scripts {
-  margin-top: 20px;
-  border-top: 1px solid #eee;
-  padding-top: 15px;
+.changelog-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  color: #409eff;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.changelog-toggle:hover {
+  color: #337ecc;
+  text-decoration: underline;
+}
+
+.update-collapse {
+  border: none;
+}
+
+:deep(.update-collapse .el-collapse-item__header) {
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 0 12px;
+  height: 40px;
+  border: 1px solid #e2e8f0;
+}
+
+:deep(.update-collapse .el-collapse-item__wrap) {
+  border: none;
+}
+
+.update-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.update-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.update-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.update-action-btn--ghost {
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  color: #606266;
+}
+
+.update-action-btn--ghost:hover:not(:disabled) {
+  background: #f5f7fa;
+  border-color: #c0c4cc;
+}
+
+.update-action-btn--outline {
+  border: 1px solid #409eff;
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.update-action-btn--outline:hover:not(:disabled) {
+  background: #d9ecff;
+  border-color: #337ecc;
+  color: #337ecc;
+}
+
+.update-action-btn--brand {
+  border: 1px solid #67c23a;
+  background: #67c23a;
+  color: #fff;
+}
+
+.update-action-btn--brand:hover:not(:disabled) {
+  background: #5daf34;
+  border-color: #5daf34;
+}
+
+.update-btn-logo {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.update-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: #409eff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.update-link-btn:hover:not(:disabled) {
+  background: #ecf5ff;
+  color: #337ecc;
+}
+
+.update-link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.update-link-btn-logo {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
 }
 
 .script-block {
@@ -421,5 +1066,102 @@ const goToRepo = () => {
   font-size: 12px;
   word-break: break-all;
   white-space: pre-wrap;
+}
+
+.online-update-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.path-detect-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.path-detect-bar code {
+  font-size: 11px;
+  background: #e2e8f0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #334155;
+}
+
+.path-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.path-card {
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.path-card.is-invalid {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.path-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.path-card-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #334155;
+}
+
+.path-match-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.path-match-hint.is-warn {
+  color: #b45309;
+}
+
+.path-match-hint.is-ok {
+  color: #15803d;
+}
+
+.path-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.online-update-progress {
+  margin-top: 4px;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+}
+
+.progress-msg {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.update-done-baota-hint {
+  margin-top: 12px;
 }
 </style>

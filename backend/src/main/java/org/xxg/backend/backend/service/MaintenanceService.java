@@ -32,7 +32,15 @@ public class MaintenanceService {
     @Autowired
     private SettingsService settingsService;
 
+    @Autowired
+    private SetupMarkerService setupMarkerService;
+
     public MaintenanceSettings getSettings() {
+        if (!setupMarkerService.isBusinessDatabaseReady()) {
+            MaintenanceSettings defaults = new MaintenanceSettings();
+            defaults.setEnabled(false);
+            return defaults;
+        }
         return maintenanceMapper.getSettings();
     }
 

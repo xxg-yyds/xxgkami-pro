@@ -52,6 +52,7 @@
         :keys="keys"
         @create-keys="handleCreateKeys"
         @delete-key="handleDeleteKey"
+        @batch-delete-keys="handleBatchDeleteKeys"
         @toggle-key-status="handleToggleKeyStatus"
         @update-key="handleUpdateKey"
       />
@@ -270,9 +271,9 @@ const handleCreateKeys = async (keyData) => {
   }, 5000)
 }
 
-const handleDeleteKey = async (keyId) => {
+const handleDeleteKey = async ({ id, storage_type }) => {
   try {
-    const result = await cardApi.deleteCard(keyId)
+    const result = await cardApi.deleteCard(id, storage_type || 'encrypted')
     if (result.success) {
       // 重新加载卡密数据
       await loadKeys()
@@ -283,6 +284,24 @@ const handleDeleteKey = async (keyId) => {
   } catch (error) {
     console.error('删除卡密失败:', error)
     alert('删除卡密失败')
+  }
+}
+
+const handleBatchDeleteKeys = async (payload) => {
+  const ids = Array.isArray(payload) ? payload : payload?.ids
+  const storageTypes = Array.isArray(payload) ? null : payload?.storageTypes
+  if (!ids?.length) return
+  try {
+    const result = await cardApi.batchDeleteCards(ids, storageTypes)
+    if (result.success) {
+      ElMessage.success(result.message || `已删除 ${result.deleted ?? ids.length} 条卡密`)
+      await loadKeys()
+    } else {
+      ElMessage.error(result.message || '批量删除失败')
+    }
+  } catch (error) {
+    console.error('批量删除卡密失败:', error)
+    ElMessage.error(error.message || '批量删除卡密失败')
   }
 }
 
@@ -301,9 +320,9 @@ const handleUpdateKey = async (keyData) => {
   }
 }
 
-const handleToggleKeyStatus = async ({ id, status }) => {
+const handleToggleKeyStatus = async ({ id, status, storage_type }) => {
   try {
-    const result = await cardApi.updateAdminStatus(id, status)
+    const result = await cardApi.updateAdminStatus(id, status, storage_type || 'encrypted')
     if (result.success) {
       const msg = result.message || '操作成功'
       if (status === 2 && msg.includes('停止使用')) {
@@ -447,12 +466,14 @@ onMounted(async () => {
 }
 
 .dashboard-main {
-  padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 1rem 1.25rem;
+  max-width: 100%;
+  margin: 0;
   width: 100%;
   box-sizing: border-box;
   flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 @media (max-width: 768px) {

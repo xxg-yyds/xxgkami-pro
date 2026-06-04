@@ -74,15 +74,11 @@ public class OpenApiController {
         if (Boolean.TRUE.equals(keyEntity.getEnableCardEncryption())) {
             try {
                 String decryptedKey = customCardObfuscator.deobfuscate(cardKey);
-                if (decryptedKey == null) {
-                    throw new RuntimeException("Decryption failed");
+                if (decryptedKey != null) {
+                    cardKey = decryptedKey;
                 }
-                cardKey = decryptedKey;
-            } catch (Exception e) {
-                response.put("code", 400);
-                response.put("message", "卡密格式错误或解密失败(Encrypted Card Key Required)");
-                response.put("success", false);
-                return ResponseEntity.badRequest().body(response);
+            } catch (Exception ignored) {
+                // 保留原文，供简单卡密核销
             }
         }
 

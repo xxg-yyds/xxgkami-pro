@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# 首次安装完成标记（由向导生成）
+data/.xxgkami-setup.complete
+data/.xxgkami-version.json
+data/.xxgkami-kami-mysql56.sql
+data/.xxgkami-kami-mysql56.meta
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -79,6 +79,10 @@ public class Card {
     @JsonProperty("merged_into_card_id")
     private Long mergedIntoCardId;
 
+    /** encrypted=主表 cards；simple=simple_cards 表 */
+    @JsonProperty("storage_type")
+    private String storageType;
+
     // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -151,4 +155,7 @@ public class Card {
 
     public Long getMergedIntoCardId() { return mergedIntoCardId; }
     public void setMergedIntoCardId(Long mergedIntoCardId) { this.mergedIntoCardId = mergedIntoCardId; }
+
+    public String getStorageType() { return storageType; }
+    public void setStorageType(String storageType) { this.storageType = storageType; }
 }

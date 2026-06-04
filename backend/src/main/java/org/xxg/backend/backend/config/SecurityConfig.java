@@ -33,6 +33,7 @@ public class SecurityConfig {
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers("/payment/**").permitAll() // 确保支付回调公开访问
                 .requestMatchers("/maintenance/status").permitAll() // 允许未登录用户检查维护状态
+                .requestMatchers("/setup/**").permitAll() // 首次安装向导
                 .requestMatchers("/error").permitAll()
                 .requestMatchers("/admin/**").hasRole("ADMIN") // 强制 /admin/** 需要 ADMIN 角色
                 // .anyRequest().authenticated() // Uncomment to enforce strict security
@@ -61,6 +62,7 @@ public class SecurityConfig {
         // 但为了方便用户直接测试 IP:8080，我们可以用 setAllowedOriginPatterns("*")
         configuration.setAllowedOriginPatterns(List.of("*"));
         configuration.setAllowCredentials(true);
+        configuration.setExposedHeaders(List.of("X-Update-Channel", "X-Update-Version-Url"));
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

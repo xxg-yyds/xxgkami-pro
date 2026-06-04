@@ -9,6 +9,7 @@ import org.xxg.backend.backend.entity.Card;
 import org.xxg.backend.backend.service.ApiKeyService;
 import org.xxg.backend.backend.service.CardService;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -55,21 +56,45 @@ public class CardController {
             String adminName = "admin";
             String creatorType = "admin";
 
-            List<Card> cards = cardService.createCards(
-                request.getCount(),
-                request.getCardType(),
-                request.getDuration(),
-                request.getTotalCount(),
-                request.getVerifyMethod(),
-                request.getEncryptionType(),
-                request.getAllowReverify(),
-                creatorType,
-                adminId,
-                adminName,
-                request.getApiKeyId(),
-                Boolean.TRUE.equals(request.getStackTimeIfSameMachine()),
-                Boolean.TRUE.equals(request.getAllowSelfUnbind())
-            );
+            List<Card> cards;
+            if (Boolean.FALSE.equals(request.getUseEncrypted())) {
+                cards = cardService.createSimpleCards(
+                        request.getCount(),
+                        request.getCardType(),
+                        request.getDuration(),
+                        request.getTotalCount(),
+                        request.getVerifyMethod(),
+                        request.getAllowReverify(),
+                        creatorType,
+                        adminId,
+                        adminName,
+                        request.getApiKeyId(),
+                        Boolean.TRUE.equals(request.getStackTimeIfSameMachine()),
+                        Boolean.TRUE.equals(request.getAllowSelfUnbind()),
+                        request.getKeyLength() != null ? request.getKeyLength() : 16,
+                        request.getManualCardKeys()
+                );
+            } else {
+                String encType = request.getEncryptionType();
+                if (encType == null || encType.isEmpty()) {
+                    encType = "advanced";
+                }
+                cards = cardService.createCards(
+                        request.getCount(),
+                        request.getCardType(),
+                        request.getDuration(),
+                        request.getTotalCount(),
+                        request.getVerifyMethod(),
+                        encType,
+                        request.getAllowReverify(),
+                        creatorType,
+                        adminId,
+                        adminName,
+                        request.getApiKeyId(),
+                        Boolean.TRUE.equals(request.getStackTimeIfSameMachine()),
+                        Boolean.TRUE.equals(request.getAllowSelfUnbind())
+                );
+            }
             return ResponseEntity.ok(Map.of("success", true, "data", cards));
         } catch (Exception e) {
             e.printStackTrace();
@@ -123,13 +148,18 @@ public class CardController {
     @PatchMapping("/admin/{id}/status")
     public ResponseEntity<Map<String, Object>> updateAdminCardStatus(
             @PathVariable Long id,
-            @RequestBody Map<String, Integer> body) {
+            @RequestBody Map<String, Object> body) {
         try {
-            Integer status = body != null ? body.get("status") : null;
+            Integer status = null;
+            if (body != null && body.get("status") instanceof Number num) {
+                status = num.intValue();
+            }
             if (status == null) {
                 return ResponseEntity.badRequest().body(Map.of("success", false, "message", "缺少 status"));
             }
-            String msg = cardService.updateAdminCardStatus(id, status);
+            String storageType = body != null && body.get("storage_type") != null
+                    ? body.get("storage_type").toString() : "encrypted";
+            String msg = cardService.updateAdminCardStatus(id, status, storageType);
             return ResponseEntity.ok(Map.of("success", true, "message", msg));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
@@ -140,10 +170,63 @@ public class CardController {
      * 删除卡密
      */
     @DeleteMapping("/{id}")
-    public ResponseEntity<Map<String, Object>> deleteCard(@PathVariable Long id) {
+    public ResponseEntity<Map<String, Object>> deleteCard(
+            @PathVariable Long id,
+            @RequestParam(value = "storage_type", defaultValue = "encrypted") String storageType) {
         try {
-            cardService.deleteCard(id);
+            cardService.deleteCard(id, storageType);
             return ResponseEntity.ok(Map.of("success", true, "message", "卡密删除成功"));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * 管理员批量删除卡密（可含已使用、已过期、已暂停等；无效 id 自动跳过）
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/admin/batch-delete")
+    public ResponseEntity<Map<String, Object>> deleteCardsBatch(@RequestBody(required = false) Map<String, Object> body) {
+        try {
+            if (body == null || !(body.get("ids") instanceof List<?>)) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("success", false, "message", "请提供 ids 数组"));
+            }
+            List<?> rawList = (List<?>) body.get("ids");
+            List<Long> ids = new ArrayList<>();
+            List<String> storageTypes = new ArrayList<>();
+            for (Object o : rawList) {
+                if (o instanceof Number num) {
+                    ids.add(num.longValue());
+                    storageTypes.add("encrypted");
+                } else if (o instanceof String str && !str.isBlank()) {
+                    try {
+                        ids.add(Long.parseLong(str.trim()));
+                        storageTypes.add("encrypted");
+                    } catch (NumberFormatException ignored) {
+                        // skip
+                    }
+                } else if (o instanceof Map<?, ?> item) {
+                    Object idObj = item.get("id");
+                    if (idObj == null) {
+                        continue;
+                    }
+                    long parsedId = idObj instanceof Number n ? n.longValue() : Long.parseLong(idObj.toString());
+                    ids.add(parsedId);
+                    Object st = item.get("storage_type");
+                    storageTypes.add(st != null ? st.toString() : "encrypted");
+                }
+            }
+            if (ids.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("success", false, "message", "没有有效的卡密 ID"));
+            }
+            int deleted = cardService.deleteCards(ids, storageTypes);
+            String msg = deleted == ids.size()
+                    ? "已成功删除 " + deleted + " 条卡密"
+                    : "已删除 " + deleted + " 条（部分 ID 不存在或无效）";
+            return ResponseEntity.ok(Map.of("success", true, "message", msg, "deleted", deleted));
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.internalServerError().body(Map.of("success", false, "message", e.getMessage()));
@@ -193,21 +276,13 @@ public class CardController {
                 
                 // 检查是否开启了卡密加密验证
                 if (Boolean.TRUE.equals(apiKey.getEnableCardEncryption())) {
-                    // 如果开启了加密验证，必须对传入的 cardKey 进行解密
-                    // 尝试解密
                     try {
                         String decryptedKey = customCardObfuscator.deobfuscate(cardKey);
-                        System.out.println("DEBUG: Encrypted Key: " + cardKey);
-                        System.out.println("DEBUG: Decrypted Key: " + decryptedKey);
-                        System.out.println("DEBUG: Contains $ ? " + (decryptedKey != null && decryptedKey.contains("$")));
-                        
-                        if (decryptedKey == null) {
-                            throw new RuntimeException("Decryption failed");
+                        if (decryptedKey != null) {
+                            cardKey = decryptedKey;
                         }
-                        // 使用解密后的卡密进行后续验证
-                        cardKey = decryptedKey;
-                    } catch (Exception e) {
-                        return ResponseEntity.badRequest().body(Map.of("success", false, "message", "卡密格式错误或解密失败(Encrypted Card Key Required)"));
+                    } catch (Exception ignored) {
+                        // 保留原文，供简单卡密核销
                     }
                 }
                 
@@ -270,6 +345,15 @@ public class CardController {
         @JsonProperty("allow_self_unbind")
         private Boolean allowSelfUnbind;
 
+        @JsonProperty("use_encrypted")
+        private Boolean useEncrypted;
+
+        @JsonProperty("key_length")
+        private Integer keyLength;
+
+        @JsonProperty("manual_card_keys")
+        private List<String> manualCardKeys;
+
         // Getters and Setters
         public int getCount() { return count; }
         public void setCount(int count) { this.count = count; }
@@ -300,5 +384,14 @@ public class CardController {
 
         public Boolean getAllowSelfUnbind() { return allowSelfUnbind; }
         public void setAllowSelfUnbind(Boolean allowSelfUnbind) { this.allowSelfUnbind = allowSelfUnbind; }
+
+        public Boolean getUseEncrypted() { return useEncrypted; }
+        public void setUseEncrypted(Boolean useEncrypted) { this.useEncrypted = useEncrypted; }
+
+        public Integer getKeyLength() { return keyLength; }
+        public void setKeyLength(Integer keyLength) { this.keyLength = keyLength; }
+
+        public List<String> getManualCardKeys() { return manualCardKeys; }
+        public void setManualCardKeys(List<String> manualCardKeys) { this.manualCardKeys = manualCardKeys; }
     }
 }
