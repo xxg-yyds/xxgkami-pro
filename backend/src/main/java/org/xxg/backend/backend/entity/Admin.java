@@ -17,6 +17,17 @@ public class Admin {
     private String totpSecret;
     private Boolean totpEnabled;
 
+    /** 1=启用 0=禁用 */
+    private Integer status;
+
+    /** 超级管理员，拥有全部权限且可管理其它管理员 */
+    private Boolean isSuper;
+
+    /** 逗号分隔的功能权限码 */
+    private String permissions;
+
+    private Long createdBy;
+
     // 构造函数
     public Admin() {}
 
@@ -104,6 +115,26 @@ public class Admin {
 
     public void setTotpEnabled(Boolean totpEnabled) {
         this.totpEnabled = totpEnabled;
+    }
+
+    public Integer getStatus() { return status; }
+    public void setStatus(Integer status) { this.status = status; }
+
+    public Boolean getIsSuper() { return isSuper; }
+    public void setIsSuper(Boolean isSuper) { this.isSuper = isSuper; }
+
+    public String getPermissions() { return permissions; }
+    public void setPermissions(String permissions) { this.permissions = permissions; }
+
+    public Long getCreatedBy() { return createdBy; }
+    public void setCreatedBy(Long createdBy) { this.createdBy = createdBy; }
+
+    public boolean isSuperAdmin() {
+        return Boolean.TRUE.equals(isSuper);
+    }
+
+    public java.util.Set<String> permissionSet() {
+        return org.xxg.backend.backend.util.AdminPermissions.parse(permissions);
     }
 
     @Override

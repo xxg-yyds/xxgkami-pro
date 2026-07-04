@@ -28,6 +28,17 @@ public class PublicCardController {
         return k;
     }
 
+    private String extractMachineCode(Map<String, String> body) {
+        if (body == null) {
+            return null;
+        }
+        String mc = body.get("machine_code");
+        if (mc == null) {
+            mc = body.get("machineCode");
+        }
+        return mc;
+    }
+
     /**
      * 查询卡密是否已绑定机器码
      */
@@ -49,7 +60,8 @@ public class PublicCardController {
     public ResponseEntity<Map<String, Object>> unbindMachine(@RequestBody(required = false) Map<String, String> body) {
         try {
             String cardKey = extractCardKey(body);
-            cardService.publicUnbindMachine(cardKey);
+            String machineCode = extractMachineCode(body);
+            cardService.publicUnbindMachine(cardKey, machineCode);
             return ResponseEntity.ok(Map.of("success", true, "message", "解绑成功"));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));

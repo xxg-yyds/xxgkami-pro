@@ -28,21 +28,29 @@ public class CardPricingController {
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> addPricing(@RequestBody CardPricing pricing) {
-        cardPricingService.addPricing(pricing);
-        Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
-        response.put("message", "添加成功");
-        return ResponseEntity.ok(response);
+        try {
+            cardPricingService.addPricing(pricing);
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "添加成功");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
+        }
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<Map<String, Object>> updatePricing(@PathVariable Integer id, @RequestBody CardPricing pricing) {
-        pricing.setId(id);
-        cardPricingService.updatePricing(pricing);
-        Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
-        response.put("message", "更新成功");
-        return ResponseEntity.ok(response);
+        try {
+            pricing.setId(id);
+            cardPricingService.updatePricing(pricing);
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "更新成功");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
+        }
     }
 
     @DeleteMapping("/{id}")

@@ -3,6 +3,7 @@ package org.xxg.backend.backend.service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.xxg.backend.backend.mapper.CardMapper;
+import org.xxg.backend.backend.mapper.SimpleCardMapper;
 import org.xxg.backend.backend.mapper.UserMapper;
 
 import java.util.HashMap;
@@ -17,15 +18,20 @@ public class StatsService {
     @Autowired
     private CardMapper cardMapper;
 
+    @Autowired
+    private SimpleCardMapper simpleCardMapper;
+
     /**
-     * 获取仪表盘统计数据
+     * 获取仪表盘统计数据（cards + simple_cards）
      */
     public Map<String, Object> getDashboardStats() {
         Map<String, Object> stats = new HashMap<>();
         
-        stats.put("totalKeys", cardMapper.countTotalCards());
-        stats.put("usedKeys", cardMapper.countUsedCards());
-        stats.put("activeKeys", cardMapper.countActiveCards());
+        stats.put("totalKeys", cardMapper.countTotalCards() + simpleCardMapper.countTotalCards());
+        stats.put("encryptedKeys", cardMapper.countTotalCards());
+        stats.put("simpleKeys", simpleCardMapper.countTotalCards());
+        stats.put("usedKeys", cardMapper.countUsedCards() + simpleCardMapper.countUsedCards());
+        stats.put("activeKeys", cardMapper.countActiveCards() + simpleCardMapper.countActiveCards());
         stats.put("totalUsers", userMapper.countTotalUsers());
         
         return stats;

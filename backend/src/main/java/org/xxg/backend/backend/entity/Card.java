@@ -27,6 +27,10 @@ public class Card {
     private LocalDateTime expireTime;
     
     private Integer duration;
+
+    /** 时间卡时长单位：days（默认）或 hours */
+    @JsonProperty("duration_unit")
+    private String durationUnit;
     
     @JsonProperty("verify_method")
     private String verifyMethod;
@@ -75,6 +79,26 @@ public class Card {
     @JsonProperty("allow_self_unbind")
     private Boolean allowSelfUnbind;
 
+    /** true：自助解绑时须验证原设备码（机器码）一致 */
+    @JsonProperty("require_device_unbind")
+    private Boolean requireDeviceUnbind;
+
+    /** 自助解绑冷却间隔（小时），0 表示不限制 */
+    @JsonProperty("unbind_cooldown_hours")
+    private Integer unbindCooldownHours;
+
+    /** 自助解绑次数上限，0 表示不限制 */
+    @JsonProperty("unbind_max_count")
+    private Integer unbindMaxCount;
+
+    /** 已累计自助解绑次数 */
+    @JsonProperty("unbind_count")
+    private Integer unbindCount;
+
+    /** 最近一次自助解绑时间（用于冷却校验） */
+    @JsonProperty("last_unbind_time")
+    private LocalDateTime lastUnbindTime;
+
     /** 若为已合并卡，指向被续期的主卡 rows */
     @JsonProperty("merged_into_card_id")
     private Long mergedIntoCardId;
@@ -107,6 +131,9 @@ public class Card {
 
     public Integer getDuration() { return duration; }
     public void setDuration(Integer duration) { this.duration = duration; }
+
+    public String getDurationUnit() { return durationUnit; }
+    public void setDurationUnit(String durationUnit) { this.durationUnit = durationUnit; }
 
     public String getVerifyMethod() { return verifyMethod; }
     public void setVerifyMethod(String verifyMethod) { this.verifyMethod = verifyMethod; }
@@ -152,6 +179,21 @@ public class Card {
 
     public Boolean getAllowSelfUnbind() { return allowSelfUnbind; }
     public void setAllowSelfUnbind(Boolean allowSelfUnbind) { this.allowSelfUnbind = allowSelfUnbind; }
+
+    public Boolean getRequireDeviceUnbind() { return requireDeviceUnbind; }
+    public void setRequireDeviceUnbind(Boolean requireDeviceUnbind) { this.requireDeviceUnbind = requireDeviceUnbind; }
+
+    public Integer getUnbindCooldownHours() { return unbindCooldownHours; }
+    public void setUnbindCooldownHours(Integer unbindCooldownHours) { this.unbindCooldownHours = unbindCooldownHours; }
+
+    public Integer getUnbindMaxCount() { return unbindMaxCount; }
+    public void setUnbindMaxCount(Integer unbindMaxCount) { this.unbindMaxCount = unbindMaxCount; }
+
+    public Integer getUnbindCount() { return unbindCount; }
+    public void setUnbindCount(Integer unbindCount) { this.unbindCount = unbindCount; }
+
+    public LocalDateTime getLastUnbindTime() { return lastUnbindTime; }
+    public void setLastUnbindTime(LocalDateTime lastUnbindTime) { this.lastUnbindTime = lastUnbindTime; }
 
     public Long getMergedIntoCardId() { return mergedIntoCardId; }
     public void setMergedIntoCardId(Long mergedIntoCardId) { this.mergedIntoCardId = mergedIntoCardId; }

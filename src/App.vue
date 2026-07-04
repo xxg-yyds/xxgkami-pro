@@ -9,7 +9,14 @@ import UserPage from './components/UserPage.vue'
 import NotificationPage from './components/NotificationPage.vue'
 import { authApi, maintenanceApi, userProfileApi, setupApi } from './services/api.js'
 import SystemSetupPage from './components/SystemSetupPage.vue'
+import ElectronEnvCheckPage from './components/ElectronEnvCheckPage.vue'
+import ElectronDesktopUpdateHost from './components/ElectronDesktopUpdateHost.vue'
 import setupLogo from './assets/icon.png'
+
+const isElectronDesktop = typeof window !== 'undefined' && !!window.electronAPI?.isDesktop
+const electronEnvReady = ref(false)
+const electronBooting = ref(isElectronDesktop)
+const electronUpdateReady = ref(false)
 
 const logoMaskVars = {
   '--setup-logo-mask': `url(${setupLogo})`
@@ -157,6 +164,9 @@ const checkLoginStatus = async () => {
     userInfo.value = null
   } finally {
     loading.value = false
+    if (isElectronDesktop && electronEnvReady.value) {
+      electronUpdateReady.value = true
+    }
   }
 }
 
@@ -251,7 +261,6 @@ const checkMaintenance = async () => {
   try {
     const res = await maintenanceApi.getStatus()
     if (res.success && res.data) {
-      console.log('维护状态检查:', res.data)
       maintenanceData.value = {
         ...res.data,
         enabled: Boolean(res.data.enabled) // 确保转换为布尔值
@@ -371,7 +380,7 @@ const handleOAuthCallback = async () => {
 }
 
 // 组件挂载时检查登录状态
-onMounted(async () => {
+const bootstrapApp = async () => {
   const oauthSuccess = await handleOAuthCallback()
   if (!oauthSuccess) {
     await refreshSetupStatus()
@@ -388,11 +397,74 @@ onMounted(async () => {
       await checkMaintenance()
     }
   }, 30000)
+}
+
+const handleElectronEnvPassed = async () => {
+  electronEnvReady.value = true
+  loading.value = true
+  await bootstrapApp()
+}
+
+async function initElectronDesktop() {
+  electronBooting.value = true
+  try {
+    const status = await window.electronAPI?.getFirstLaunchStatus?.()
+    if (!status?.complete) {
+      electronEnvReady.value = false
+      loading.value = false
+      return
+    }
+
+    electronEnvReady.value = true
+    loading.value = true
+
+    const backend = await window.electronAPI?.ensureBackendReady?.()
+    if (!backend?.started) {
+      electronEnvReady.value = false
+      loading.value = false
+      ElMessage.error(backend?.message || '后端未就绪，请重新完成环境检测')
+      return
+    }
+
+    await bootstrapApp()
+  } catch (error) {
+    console.error('Electron 启动失败:', error)
+    electronEnvReady.value = false
+    loading.value = false
+    ElMessage.error(error.message || '程序启动失败')
+  } finally {
+    electronBooting.value = false
+  }
+}
+
+onMounted(async () => {
+  if (isElectronDesktop) {
+    await initElectronDesktop()
+    return
+  }
+  await bootstrapApp()
 })
 </script>
 
 <template>
   <div id="app">
+    <!-- Electron 桌面版：Windows 环境检测 -->
+    <div v-if="isElectronDesktop && electronBooting" class="loading-container">
+      <div class="loading-content">
+        <div class="loading-card">
+          <img :src="brandLogo" class="loading-brand-icon" alt="" width="56" height="56" />
+          <h2 class="loading-brand">XXG-KAMI-PRO</h2>
+          <p class="loading-text">正在启动程序…</p>
+        </div>
+      </div>
+    </div>
+
+    <ElectronEnvCheckPage
+      v-else-if="isElectronDesktop && !electronEnvReady"
+      @passed="handleElectronEnvPassed"
+    />
+
+    <template v-else>
     <!-- 系统维护遮罩层 -->
     <div v-if="maintenanceData && maintenanceData.enabled && (!isLoggedIn || userInfo?.role !== 'admin') && currentPage !== 'login' && currentPage !== 'dashboard' && currentPage !== 'system-setup' && currentPage !== 'online-unbind'" class="maintenance-overlay">
       <div class="maintenance-content">
@@ -479,6 +551,9 @@ onMounted(async () => {
       :user-info="userInfo"
       @logout="handleLogout"
     />
+    </template>
+
+    <ElectronDesktopUpdateHost v-if="isElectronDesktop" :enabled="electronUpdateReady" />
   </div>
 </template>
 
@@ -838,7 +913,7 @@ onMounted(async () => {
 
 .welcome-card {
   background: white;
-  border-radius: 8px;
+  border-radius: var(--card-radius);
   padding: 2rem;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }

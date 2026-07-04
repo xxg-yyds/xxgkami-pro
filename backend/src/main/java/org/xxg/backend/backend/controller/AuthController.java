@@ -49,10 +49,15 @@ public class AuthController {
     }
 
     @PostMapping("/admin/login")
-    public LoginResponse loginAdmin(@RequestBody LoginRequest request) {
+    public LoginResponse loginAdmin(@RequestBody LoginRequest request, jakarta.servlet.http.HttpServletRequest httpRequest) {
         System.out.println("Login attempt for admin: " + request.getUsername());
         try {
-            Map<String, Object> data = authService.loginAdmin(request.getUsername(), request.getPassword(), request.getTotpCode());
+            Map<String, Object> data = authService.loginAdmin(
+                    request.getUsername(),
+                    request.getPassword(),
+                    request.getTotpCode(),
+                    org.xxg.backend.backend.util.ClientIpUtils.resolve(httpRequest)
+            );
             if (data != null) {
                 if (data.containsKey("requireTotp")) {
                     return LoginResponse.error("TOTP_REQUIRED");

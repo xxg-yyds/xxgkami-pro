@@ -7,6 +7,10 @@
           <i class="fas fa-file-export"></i>
           导出数据
         </button>
+        <button class="btn-secondary" @click="showImportModal = true">
+          <i class="fas fa-file-import"></i>
+          导入卡密
+        </button>
         <button class="btn-primary" @click="showCreateKeyModal = true">
           <i class="fas fa-plus"></i>
           生成卡密
@@ -16,23 +20,35 @@
 
     <div class="keys-toolbar">
       <div class="toolbar-search">
-        <label class="toolbar-label" for="machine-code-search">机器码搜索</label>
+        <label class="toolbar-label" for="keys-search-type">搜索</label>
+        <select id="keys-search-type" v-model="searchType" class="toolbar-select">
+          <option value="card_key">卡密</option>
+          <option value="machine_code">机器码</option>
+          <option value="ip_address">IP</option>
+        </select>
+        <select id="keys-search-storage" v-model="searchStorageScope" class="toolbar-select">
+          <option value="all">全部类型</option>
+          <option value="encrypted">仅加密</option>
+          <option value="simple">仅简单</option>
+        </select>
         <input
-          id="machine-code-search"
-          v-model.trim="machineCodeSearch"
+          id="keys-search-input"
+          v-model.trim="searchQuery"
           type="search"
           class="toolbar-input"
-          placeholder="输入设备码关键字，筛选已绑定该机器码的卡密"
+          :placeholder="searchPlaceholder"
           autocomplete="off"
           spellcheck="false"
         />
-        <button v-if="machineCodeSearch" type="button" class="toolbar-clear" @click="machineCodeSearch = ''">
+        <button v-if="searchQuery" type="button" class="toolbar-clear" @click="clearSearch">
           清除
         </button>
       </div>
       <p class="toolbar-meta">
         当前列表：<strong>{{ filteredKeys.length }}</strong> 条
-        <template v-if="machineCodeSearch">（已按机器码过滤）</template>
+        <template v-if="searchQuery || searchStorageScope !== 'all'">
+          （已筛选<template v-if="searchStorageScope !== 'all'">·{{ searchStorageScopeLabel }}</template><template v-if="searchQuery">·{{ searchTypeLabel }}</template>）
+        </template>
         <span class="toolbar-divider">|</span>
         全库共计 {{ props.keys?.length || 0 }} 条
       </p>
@@ -47,6 +63,22 @@
       >
         <i class="fas fa-trash-alt"></i>
         批量删除（{{ selectedIds.length }}）
+      </button>
+      <button
+        type="button"
+        class="btn-secondary btn-toolbar"
+        @click="batchUnbindKeys"
+      >
+        <i class="fas fa-unlink"></i>
+        {{ selectedIds.length ? `解绑选中（${selectedIds.length}）` : '一键解绑全库' }}
+      </button>
+      <button
+        type="button"
+        class="btn-secondary btn-toolbar"
+        @click="openBatchAdjustModal"
+      >
+        <i class="fas fa-clock"></i>
+        {{ selectedIds.length ? `加扣时（${selectedIds.length}）` : '全库加扣时' }}
       </button>
       <button type="button" class="btn-secondary btn-toolbar" @click="clearSelection">
         清空所选
@@ -68,7 +100,7 @@
         选中已使用的（含暂停/合并）
       </button>
       <span class="bulk-hint">
-        可跨分页多选修改机器码检索后不符合条件的勾选会自动取消。
+        可跨分页多选；搜索筛选后不符合条件的勾选会自动取消。
       </span>
     </div>
 
@@ -98,7 +130,7 @@
         <tbody>
           <tr v-if="filteredKeys.length === 0">
             <td colspan="11" class="empty-table-hint">
-              {{ machineCodeSearch ? '没有绑定该机器码的卡密（可尝试缩短关键字或清除筛选）' : '暂无卡密数据' }}
+              {{ searchQuery ? emptyFilterHint : '暂无卡密数据' }}
             </td>
           </tr>
           <template v-else>
@@ -110,8 +142,8 @@
               />
             </td>
             <td class="col-id">{{ key.id }}</td>
-            <td class="key-code-cell" @click="copyKey(key.card_key)" :title="key.card_key + '（点击复制）'">
-              <span class="key-code">{{ key.card_key }}</span>
+            <td class="key-code-cell" @click="copyKey(getCardKeyText(key))" :title="getCardKeyText(key) + '（点击复制）'">
+              <span class="key-code">{{ getCardKeyText(key) }}</span>
             </td>
             <td>
               <span :class="['encrypt-tag', isSimpleCard(key) ? 'encrypt-simple' : 'encrypt-advanced']">
@@ -145,13 +177,13 @@
                 >
                   {{ formatTimeCardRemaining(key) }}
                 </span>
-                <span v-else class="time-spec">{{ (key.duration ?? 0) }}天·未激活</span>
+                <span v-else class="time-spec">{{ formatDurationSpec(key) }}·未激活</span>
               </template>
               <template v-else>{{ key.remaining_count }} 次</template>
             </td>
             <td class="col-actions">
               <div class="action-buttons">
-                <button type="button" class="btn-secondary btn-sm" @click="copyKey(key.card_key)">复制</button>
+                <button type="button" class="btn-secondary btn-sm" @click="copyKey(getCardKeyText(key))">复制</button>
                 <button type="button" class="btn-primary btn-sm" @click="editKey(key)">编辑</button>
                 <button
                   v-if="key.status === 0 || key.status === 2"
@@ -270,43 +302,61 @@
               <div class="setting-group">
                 <h4>卡密加密方式</h4>
                 <p class="export-scope-hint">按存储类型筛选要导出的记录（加密卡密在 cards 表，简单卡密在 simple_cards 表）。</p>
-                <div class="radio-group">
-                  <label class="radio-label">
-                    <input type="radio" v-model="exportStorageScope" value="all"> 全部
-                  </label>
-                  <label class="radio-label">
-                    <input type="radio" v-model="exportStorageScope" value="encrypted"> 仅加密卡密
-                  </label>
-                  <label class="radio-label">
-                    <input type="radio" v-model="exportStorageScope" value="simple"> 仅简单卡密
+                <div class="export-segment-group export-segment-group--stack">
+                  <label
+                    v-for="opt in exportStorageScopeOptions"
+                    :key="opt.value"
+                    class="export-segment-option"
+                    :class="{ active: exportStorageScope === opt.value }"
+                  >
+                    <input type="radio" v-model="exportStorageScope" :value="opt.value">
+                    <span>{{ opt.label }}</span>
                   </label>
                 </div>
               </div>
 
               <div class="setting-group">
                 <h4>导出范围</h4>
-                <p class="export-scope-hint">先应用列表「机器码搜索」，再按使用状态筛选。</p>
-                <div class="radio-group horizontal">
-                  <label class="radio-label">
-                    <input type="radio" v-model="exportUsageScope" value="all"> 全部
+                <p class="export-scope-hint">先应用列表顶部搜索筛选，再按使用状态筛选。</p>
+                <div class="export-segment-group">
+                  <label
+                    v-for="opt in exportUsageScopeOptions"
+                    :key="opt.value"
+                    class="export-segment-option"
+                    :class="{ active: exportUsageScope === opt.value }"
+                  >
+                    <input type="radio" v-model="exportUsageScope" :value="opt.value">
+                    <span>{{ opt.label }}</span>
                   </label>
-                  <label class="radio-label">
-                    <input type="radio" v-model="exportUsageScope" value="unused"> 仅未使用
+                </div>
+              </div>
+
+              <div class="setting-group">
+                <h4>创建时间</h4>
+                <p class="export-scope-hint">可选：仅导出指定日期范围内创建的卡密（留空表示不限制）。</p>
+                <div class="export-date-range">
+                  <label class="export-date-field">
+                    <span>起</span>
+                    <input v-model="exportCreateDateStart" type="date" />
                   </label>
-                  <label class="radio-label">
-                    <input type="radio" v-model="exportUsageScope" value="used"> 已使用
+                  <label class="export-date-field">
+                    <span>止</span>
+                    <input v-model="exportCreateDateEnd" type="date" />
                   </label>
                 </div>
               </div>
 
               <div class="setting-group">
                 <h4>导出格式</h4>
-                <div class="radio-group horizontal">
-                  <label class="radio-label">
-                    <input type="radio" v-model="exportFormat" value="xlsx"> Excel (.xlsx)
-                  </label>
-                  <label class="radio-label">
-                    <input type="radio" v-model="exportFormat" value="csv"> CSV (.csv)
+                <div class="export-segment-group">
+                  <label
+                    v-for="opt in exportFormatOptions"
+                    :key="opt.value"
+                    class="export-segment-option"
+                    :class="{ active: exportFormat === opt.value }"
+                  >
+                    <input type="radio" v-model="exportFormat" :value="opt.value">
+                    <span>{{ opt.label }}</span>
                   </label>
                 </div>
               </div>
@@ -315,7 +365,7 @@
                 <h4>选择导出列</h4>
                 <p class="export-column-hint">导入其它平台时通常只勾选「卡密」；每行一条密钥。</p>
                 <div class="checkbox-grid">
-                  <label v-for="col in availableColumns" :key="col.key" class="checkbox-label">
+                  <label v-for="col in cardExportColumns" :key="col.key" class="checkbox-label">
                     <input type="checkbox" v-model="selectedColumns" :value="col.key">
                     {{ col.label }}
                   </label>
@@ -331,7 +381,7 @@
                   <thead>
                     <tr>
                       <th v-for="colKey in selectedColumns" :key="colKey">
-                        {{ getColumnLabel(colKey) }}
+                        {{ getExportColumnLabel(colKey) }}
                       </th>
                     </tr>
                   </thead>
@@ -358,6 +408,72 @@
       </div>
     </div>
 
+    <!-- 导入卡密模态框 -->
+    <div v-if="showImportModal" class="modal-overlay" @click="showImportModal = false">
+      <div class="modal-content import-modal" @click.stop>
+        <div class="modal-header">
+          <h3>导入卡密</h3>
+          <button class="close-btn" @click="showImportModal = false">×</button>
+        </div>
+        <div class="modal-body">
+          <p class="form-hint">
+            支持 .txt / .csv / .xlsx。可仅填卡密（使用下方默认值），或在 Excel/CSV 中填写「卡密、类型、时长/次数、单位」列。
+          </p>
+          <p class="import-template-row">
+            <button type="button" class="import-template-btn" @click="downloadImportTemplate">
+              <i class="fas fa-file-excel"></i>
+              下载 Excel 导入示例
+            </button>
+            <span class="import-template-note">含示例卡密与填写说明，可按格式填写后导入</span>
+          </p>
+          <div class="form-group">
+            <label>选择文件</label>
+            <input type="file" accept=".txt,.csv,.xlsx,.xls" @change="onImportFileChange">
+          </div>
+          <div v-if="importPreview.length" class="form-group">
+            <label>预览（前 5 条，共 {{ importPreview.length }} 条）</label>
+            <pre class="import-preview">{{ importPreviewDisplay }}</pre>
+          </div>
+          <p v-if="importPreview.length && !importFileHasSpecs" class="form-hint import-defaults-hint">
+            文件中未包含类型/时长/次数列，将统一使用下方默认值。
+          </p>
+          <div class="form-group">
+            <label>默认卡密类型</label>
+            <select v-model="importForm.card_type">
+              <option value="time">时间卡</option>
+              <option value="count">次数卡</option>
+            </select>
+          </div>
+          <div v-if="importForm.card_type === 'time'" class="form-group">
+            <label>默认时长</label>
+            <div class="inline-fields">
+              <input
+                v-if="importForm.duration_unit !== 'permanent'"
+                v-model.number="importForm.duration"
+                type="number"
+                min="1"
+              >
+              <select v-model="importForm.duration_unit">
+                <option value="days">天</option>
+                <option value="hours">小时</option>
+                <option value="permanent">永久</option>
+              </select>
+            </div>
+          </div>
+          <div v-if="importForm.card_type === 'count'" class="form-group">
+            <label>默认总次数</label>
+            <input v-model.number="importForm.total_count" type="number" min="1">
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="showImportModal = false">取消</button>
+          <button class="btn-primary" :disabled="importing || importPreview.length === 0" @click="confirmImport">
+            {{ importing ? '导入中…' : `确认导入 ${importPreview.length} 条` }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 编辑卡密模态框 -->
     <div v-if="showEditKeyModal" class="modal-overlay" @click="showEditKeyModal = false">
       <div class="modal-content" @click.stop>
@@ -379,9 +495,22 @@
               <option value="count">次数卡密</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>持续时间（天）</label>
-            <input type="number" v-model="editingKey.duration" min="1" max="365" />
+          <div class="form-group" v-if="editingKey.card_type === 'time'">
+            <label>持续时长</label>
+            <div class="duration-input-row">
+              <input
+                v-if="editingKey.duration_unit !== 'permanent'"
+                type="number"
+                v-model="editingKey.duration"
+                min="1"
+                :max="editingKey.duration_unit === 'hours' ? 8760 : 365"
+              />
+              <select v-model="editingKey.duration_unit">
+                <option value="days">天</option>
+                <option value="hours">小时</option>
+                <option value="permanent">永久</option>
+              </select>
+            </div>
           </div>
           <div class="form-group" v-if="editingKey.card_type === 'count'">
             <label>总次数</label>
@@ -390,6 +519,31 @@
           <div class="form-group" v-if="editingKey.card_type === 'count'">
             <label>剩余次数</label>
             <input type="number" v-model="editingKey.remaining_count" min="0" :max="editingKey.total_count" />
+          </div>
+          <div class="form-group adjust-group">
+            <label>{{ editingKey.card_type === 'time' ? '加时 / 扣时（可选）' : '加次 / 扣次（可选）' }}</label>
+            <div class="adjust-row">
+              <select v-model="editingKey.adjust_direction">
+                <option value="add">{{ editingKey.card_type === 'time' ? '加时' : '加次' }}</option>
+                <option value="subtract">{{ editingKey.card_type === 'time' ? '扣时' : '扣次' }}</option>
+              </select>
+              <input
+                type="number"
+                v-model.number="editingKey.adjust_amount"
+                min="0"
+                placeholder="数量"
+              />
+              <select v-model="editingKey.adjust_unit">
+                <template v-if="editingKey.card_type === 'time'">
+                  <option value="hours">小时</option>
+                  <option value="days">天</option>
+                </template>
+                <option v-else value="times">次</option>
+              </select>
+            </div>
+            <small class="form-hint">
+              保存时若数量大于 0 则生效；已激活时间卡按到期时间加减，未激活则改有效时长。
+            </small>
           </div>
           <div class="form-group">
             <label>状态</label>
@@ -436,6 +590,58 @@
               </label>
             </div>
           </div>
+          <template v-if="editingKey.allow_self_unbind">
+            <div class="form-group stack-time-stack-group">
+              <div
+                class="stack-option-card"
+                :class="{ 'stack-option-card--active': editingKey.require_device_unbind }"
+              >
+                <label class="stack-toggle-row">
+                  <span class="stack-switch">
+                    <input
+                      type="checkbox"
+                      v-model="editingKey.require_device_unbind"
+                      class="stack-switch-input"
+                    />
+                    <span class="stack-switch-track">
+                      <span class="stack-switch-thumb"></span>
+                    </span>
+                  </span>
+                  <span class="stack-toggle-copy">
+                    <span class="stack-toggle-title">原设备解绑</span>
+                    <span class="stack-toggle-desc">开启后，用户解绑须填写与原绑定一致的设备码。</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>解绑冷却间隔（小时）</label>
+              <input
+                v-model.number="editingKey.unbind_cooldown_hours"
+                type="number"
+                min="0"
+                placeholder="0 表示不限制"
+              />
+              <small class="form-hint">两次自助解绑之间的最短间隔，0 为不限制。</small>
+            </div>
+            <div class="form-group">
+              <label>解绑次数上限</label>
+              <input
+                v-model.number="editingKey.unbind_max_count"
+                type="number"
+                min="0"
+                placeholder="0 表示不限制"
+              />
+              <small class="form-hint">该卡累计可自助解绑的最大次数，0 为不限制。</small>
+            </div>
+            <div v-if="editingKey.unbind_count > 0 || editingKey.last_unbind_time" class="form-group">
+              <label>解绑统计</label>
+              <p class="form-hint">
+                已解绑 {{ editingKey.unbind_count || 0 }} 次
+                <span v-if="editingKey.last_unbind_time">，上次解绑：{{ editingKey.last_unbind_time }}</span>
+              </p>
+            </div>
+          </template>
           <div class="form-group">
             <label>机器码</label>
             <div class="machine-code-edit">
@@ -463,6 +669,50 @@
           <button class="btn-primary" @click="updateKey">
             <i class="fas fa-save"></i>
             保存
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 批量加扣时模态框 -->
+    <div v-if="showBatchAdjustModal" class="modal-overlay" @click="showBatchAdjustModal = false">
+      <div class="modal-content batch-adjust-modal" @click.stop>
+        <div class="modal-header">
+          <h3>批量加时 / 扣时</h3>
+          <button class="close-btn" @click="showBatchAdjustModal = false">×</button>
+        </div>
+        <div class="modal-body">
+          <p class="batch-adjust-scope">
+            作用范围：
+            <strong v-if="selectedIds.length">已勾选 {{ selectedIds.length }} 条</strong>
+            <strong v-else>全库 {{ props.keys?.length || 0 }} 条</strong>
+            <span class="form-hint">（时间卡按小时/天，次数卡按「次」；不匹配类型自动跳过）</span>
+          </p>
+          <div class="form-group">
+            <label>操作</label>
+            <select v-model="batchAdjustForm.adjust_direction">
+              <option value="add">增加</option>
+              <option value="subtract">扣减</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>数量</label>
+            <input type="number" v-model.number="batchAdjustForm.adjust_amount" min="1" />
+          </div>
+          <div class="form-group">
+            <label>单位</label>
+            <select v-model="batchAdjustForm.adjust_unit">
+              <option value="hours">小时（时间卡）</option>
+              <option value="days">天（时间卡）</option>
+              <option value="times">次（次数卡）</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="showBatchAdjustModal = false">取消</button>
+          <button class="btn-primary" @click="confirmBatchAdjust">
+            <i class="fas fa-check"></i>
+            确认执行
           </button>
         </div>
       </div>
@@ -501,7 +751,13 @@
                 </div>
               </div>
 
-              <div class="form-row" :class="newKey.use_encrypted ? 'form-row-2' : 'form-row-3'">
+              <div
+                class="form-row"
+                :class="{
+                  'form-row-3': !newKey.use_encrypted && newKey.card_type === 'count',
+                  'form-row-2': (!newKey.use_encrypted && newKey.card_type === 'time') || (newKey.use_encrypted && newKey.card_type === 'count')
+                }"
+              >
                 <div v-if="!newKey.use_encrypted" class="form-group form-group-compact">
                   <label>卡密长度</label>
                   <input
@@ -522,13 +778,27 @@
                     :disabled="!newKey.use_encrypted && newKey.manual_mode"
                   />
                 </div>
-                <div v-if="newKey.card_type === 'time'" class="form-group form-group-compact">
-                  <label>持续天数</label>
-                  <input type="number" v-model="newKey.duration" min="1" max="365" />
-                </div>
                 <div v-if="newKey.card_type === 'count'" class="form-group form-group-compact">
                   <label>总次数</label>
                   <input type="number" v-model="newKey.total_count" min="1" max="10000" />
+                </div>
+              </div>
+
+              <div v-if="newKey.card_type === 'time'" class="form-group form-group-compact create-duration-field">
+                <label>持续时长</label>
+                <div class="duration-input-row">
+                  <input
+                    v-if="newKey.duration_unit !== 'permanent'"
+                    type="number"
+                    v-model="newKey.duration"
+                    min="1"
+                    :max="newKey.duration_unit === 'hours' ? 8760 : 365"
+                  />
+                  <select v-model="newKey.duration_unit">
+                    <option value="days">天</option>
+                    <option value="hours">小时</option>
+                    <option value="permanent">永久</option>
+                  </select>
                 </div>
               </div>
 
@@ -551,13 +821,13 @@
                     </span>
                     <span class="stack-toggle-copy">
                       <span class="stack-toggle-title">手动输入卡密</span>
-                      <span class="stack-toggle-desc">按生成数量逐行填写；关闭则随机生成。</span>
+                      <span class="stack-toggle-desc">按生成数量逐行填写；关闭则按序号自动递增（不与库内重复）。</span>
                     </span>
                   </label>
                 </div>
               </div>
 
-              <div v-if="newKey.card_type === 'time'" class="form-group stack-time-stack-group stack-time-stack-group--compact">
+              <div v-if="newKey.card_type === 'time' && newKey.duration_unit !== 'permanent'" class="form-group stack-time-stack-group stack-time-stack-group--compact">
                 <div
                   class="stack-option-card stack-option-card--compact"
                   :class="{ 'stack-option-card--active': newKey.stack_time_if_same_machine }"
@@ -592,10 +862,49 @@
                   </label>
                 </div>
               </div>
+
+              <template v-if="newKey.allow_self_unbind">
+                <div class="form-group stack-time-stack-group stack-time-stack-group--compact">
+                  <div
+                    class="stack-option-card stack-option-card--compact"
+                    :class="{ 'stack-option-card--active': newKey.require_device_unbind }"
+                  >
+                    <label class="stack-toggle-row">
+                      <span class="stack-switch stack-switch--sm">
+                        <input type="checkbox" v-model="newKey.require_device_unbind" class="stack-switch-input" />
+                        <span class="stack-switch-track"><span class="stack-switch-thumb"></span></span>
+                      </span>
+                      <span class="stack-toggle-copy">
+                        <span class="stack-toggle-title">原设备解绑</span>
+                        <span class="stack-toggle-desc">解绑时须验证原设备码一致。</span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+                <div class="form-group form-group-compact">
+                  <label>解绑冷却（小时）</label>
+                  <input v-model.number="newKey.unbind_cooldown_hours" type="number" min="0" placeholder="0=不限" />
+                </div>
+                <div class="form-group form-group-compact">
+                  <label>解绑次数上限</label>
+                  <input v-model.number="newKey.unbind_max_count" type="number" min="0" placeholder="0=不限" />
+                </div>
+              </template>
             </div>
           </div>
 
-          <div v-if="!newKey.use_encrypted && newKey.manual_mode" class="form-group form-group-compact create-form-full">
+              <div v-if="!newKey.use_encrypted && !newKey.manual_mode" class="form-group form-group-compact create-form-full">
+                <label>卡密前缀（可选）</label>
+                <input
+                  v-model.trim="newKey.key_prefix"
+                  type="text"
+                  maxlength="64"
+                  placeholder="如 VIP，后面自动递增数字"
+                />
+                <small class="form-hint">自动按「前缀 + 递增序号」生成，并与库内已有卡密查重。</small>
+              </div>
+
+              <div v-if="!newKey.use_encrypted && newKey.manual_mode" class="form-group form-group-compact create-form-full">
             <label>卡密内容（每行一条，共 {{ newKey.count }} 条）</label>
             <textarea
               v-model="newKey.manual_keys_text"
@@ -624,6 +933,19 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as XLSX from 'xlsx'
 import { cardApi } from '../services/api.js'
 import { copyToClipboard } from '../utils/clipboard.js'
+import '../styles/card-export-modal.css'
+import {
+  CARD_EXPORT_COLUMNS,
+  EXPORT_FORMAT_OPTIONS,
+  EXPORT_STORAGE_SCOPE_OPTIONS,
+  EXPORT_USAGE_SCOPE_OPTIONS,
+  filterCardsForExport,
+  getCardKeyText,
+  getExportColumnLabel,
+  isPermanentDurationUnit,
+  parseCreateTimeMs,
+  processCardExportData,
+} from '../utils/cardExport.js'
 
 const props = defineProps({
   keys: Array
@@ -631,8 +953,11 @@ const props = defineProps({
 
 const emit = defineEmits([
   'create-keys',
+  'import-keys',
   'delete-key',
   'batch-delete-keys',
+  'batch-unbind-keys',
+  'batch-adjust-keys',
   'update-key',
   'toggle-key-status'
 ])
@@ -664,11 +989,13 @@ const parseExpireTimeMs = (key) => {
 }
 
 const isTimeCardExpired = (key) => {
+  if (isPermanentDurationUnit(key?.duration_unit)) return false
   const end = parseExpireTimeMs(key)
   return end != null && end <= nowMs.value
 }
 
 const formatTimeCardRemaining = (key) => {
+  if (isPermanentDurationUnit(key?.duration_unit)) return '永久'
   const end = parseExpireTimeMs(key)
   if (end == null) return '—'
   const ms = end - nowMs.value
@@ -686,124 +1013,89 @@ const formatTimeCardRemaining = (key) => {
 
 const showCreateKeyModal = ref(false)
 const showEditKeyModal = ref(false)
+const showBatchAdjustModal = ref(false)
 const showExportModal = ref(false)
+const showImportModal = ref(false)
+const importing = ref(false)
+const importPreview = ref([])
+const importFileHasSpecs = ref(false)
+const importForm = reactive({
+  card_type: 'time',
+  duration: 30,
+  duration_unit: 'days',
+  total_count: 100,
+  verify_method: 'web',
+  allow_reverify: 1,
+  allow_self_unbind: false
+})
 const exporting = ref(false)
 const exportFormat = ref('xlsx')
 /** all | unused | used — 导出时筛选未使用 / 已使用（含暂停） */
 const exportUsageScope = ref('all')
 /** all | encrypted | simple — 按卡密存储/加密方式筛选 */
 const exportStorageScope = ref('all')
-/** 列表与导出预览均先按机器码关键字过滤（不区分大小写） */
-const machineCodeSearch = ref('')
+/** all | encrypted | simple — 列表搜索按卡密类型筛选 */
+const searchStorageScope = ref('all')
+const searchType = ref('card_key')
+const searchQuery = ref('')
+/** 导出：创建时间起止（YYYY-MM-DD，留空不限制） */
+const exportCreateDateStart = ref('')
+const exportCreateDateEnd = ref('')
+
+const searchStorageScopeLabel = computed(() => {
+  const map = { all: '全部', encrypted: '加密卡密', simple: '简单卡密' }
+  return map[searchStorageScope.value] || '全部'
+})
+
+const isSimpleCard = (key) =>
+  key?.storage_type === 'simple' || key?.encryption_type === 'simple'
+
+const getSearchFieldValue = (key, field) => {
+  if (field === 'card_key') return getCardKeyText(key)
+  if (field === 'machine_code') return (key?.machine_code || key?.machineCode || '').toString()
+  if (field === 'ip_address') return (key?.ip_address || key?.ipAddress || '').toString()
+  return (key?.[field] ?? '').toString()
+}
+
+const searchTypeLabel = computed(() => {
+  const map = { card_key: '卡密', machine_code: '机器码', ip_address: 'IP' }
+  return map[searchType.value] || '关键字'
+})
+
+const searchPlaceholder = computed(() => {
+  const map = {
+    card_key: '输入卡密关键字，支持部分匹配',
+    machine_code: '输入设备码关键字，筛选已绑定该机器码的卡密',
+    ip_address: '输入 IP 关键字，筛选使用该 IP 激活的卡密'
+  }
+  return map[searchType.value] || '输入关键字搜索'
+})
+
+const emptyFilterHint = computed(
+  () => `没有匹配该${searchTypeLabel.value}的卡密（可尝试缩短关键字或清除筛选）`
+)
+
+const clearSearch = () => {
+  searchQuery.value = ''
+}
 /** 默认仅导出卡密，便于批量导入外部系统（不再默认附带状态、创建时间等列） */
 const selectedColumns = ref(['card_key'])
-
-const availableColumns = [
-  { key: 'id', label: '序号' },
-  { key: 'card_key', label: '卡密' },
-  { key: 'storage_type', label: '加密方式' },
-  { key: 'encrypted_key', label: '传输加密串' },
-  { key: 'user_info', label: '使用者' },
-  { key: 'remaining_time', label: '剩余时间' },
-  { key: 'remaining_count', label: '剩余次数' },
-  { key: 'expire_time', label: '过期时间' },
-  { key: 'card_type', label: '卡密类型' },
-  { key: 'status', label: '状态' },
-  { key: 'create_time', label: '创建时间' },
-  { key: 'machine_code', label: '机器码' },
-  { key: 'is_exclusive', label: '是否专属' },
-  { key: 'api_key_id', label: '专属API Key' }
-]
-
-const getColumnLabel = (key) => {
-  const col = availableColumns.find(c => c.key === key)
-  return col ? col.label : key
-}
-
-// 简单的前端混淆实现，与ApiManagePage保持一致
-const obfuscateCardKey = (rawKey) => {
-  if (!rawKey) return rawKey
-  try {
-    const encoded = encodeURIComponent(rawKey)
-    const reversed = encoded.split('').reverse().join('')
-    const base64 = btoa(reversed)
-    return base64.replace(/e/g, '*').replace(/U/g, '-')
-  } catch (e) {
-    console.error('Obfuscation failed:', e)
-    return rawKey
-  }
-}
-
-const processExportData = (data) => {
-  return data.map(item => {
-    const processed = {}
-    
-    // 基础字段处理
-    if (selectedColumns.value.includes('id')) processed.id = item.id
-    if (selectedColumns.value.includes('card_key')) processed.card_key = item.card_key
-    if (selectedColumns.value.includes('storage_type')) {
-      processed.storage_type = item.storage_type === 'simple' ? '简单' : '加密'
-    }
-    if (selectedColumns.value.includes('encrypted_key')) {
-      processed.encrypted_key = item.storage_type === 'simple'
-        ? '-'
-        : obfuscateCardKey(item.card_key)
-    }
-    
-    // 使用者信息 (优先显示设备ID或IP)
-    if (selectedColumns.value.includes('user_info')) {
-      processed.user_info = item.device_id ? `Device: ${item.device_id}` : (item.ip_address ? `IP: ${item.ip_address}` : '-')
-    }
-    
-    // 剩余时间/次数
-    if (selectedColumns.value.includes('remaining_time')) {
-      if (item.card_type === 'time') {
-        if (item.expire_time) {
-          const ms = new Date(item.expire_time).getTime() - Date.now()
-          if (ms <= 0) {
-            processed.remaining_time = '已过期'
-          } else {
-            const d = Math.floor(ms / 86400000)
-            const h = Math.floor((ms % 86400000) / 3600000)
-            const m = Math.floor((ms % 3600000) / 60000)
-            processed.remaining_time = d > 0 ? `${d}天${h}小时${m}分钟` : `${h}小时${m}分钟`
-          }
-        } else {
-          processed.remaining_time = `${item.duration}天（未激活）`
-        }
-      } else {
-        processed.remaining_time = '-'
-      }
-    }
-    if (selectedColumns.value.includes('remaining_count')) {
-      processed.remaining_count = item.card_type === 'count' ? `${item.remaining_count}/${item.total_count}` : '-'
-    }
-
-    // 时间字段
-    if (selectedColumns.value.includes('expire_time')) {
-      processed.expire_time = item.expire_time ? formatDate(item.expire_time) : (item.card_type === 'time' ? '未激活' : '-')
-    }
-    if (selectedColumns.value.includes('create_time')) processed.create_time = formatDate(item.create_time) // Add create_time if needed, though not in user request list but useful
-    
-    // 类型和专属信息
-    if (selectedColumns.value.includes('card_type')) processed.card_type = getCardTypeText(item.card_type)
-    if (selectedColumns.value.includes('status')) processed.status = getStatusText(item.status) // Status also useful
-    if (selectedColumns.value.includes('machine_code')) processed.machine_code = item.machine_code || '-'
-    if (selectedColumns.value.includes('is_exclusive')) processed.is_exclusive = item.api_key_id ? '是' : '否'
-    if (selectedColumns.value.includes('api_key_id')) processed.api_key_id = item.api_key_id || '-'
-    
-    return processed
-  })
-}
+const cardExportColumns = CARD_EXPORT_COLUMNS
+const exportStorageScopeOptions = EXPORT_STORAGE_SCOPE_OPTIONS
+const exportUsageScopeOptions = EXPORT_USAGE_SCOPE_OPTIONS
+const exportFormatOptions = EXPORT_FORMAT_OPTIONS
 
 const filteredKeys = computed(() => {
-  const list = props.keys || []
-  const q = (machineCodeSearch.value || '').trim().toLowerCase()
+  let list = props.keys || []
+  if (searchStorageScope.value === 'simple') {
+    list = list.filter((k) => isSimpleCard(k))
+  } else if (searchStorageScope.value === 'encrypted') {
+    list = list.filter((k) => !isSimpleCard(k))
+  }
+  const q = (searchQuery.value || '').trim().toLowerCase()
   if (!q) return list
-  return list.filter((k) => {
-    const mc = (k.machine_code ?? '').toString().toLowerCase()
-    return mc.includes(q)
-  })
+  const field = searchType.value
+  return list.filter((k) => getSearchFieldValue(k, field).toLowerCase().includes(q))
 })
 
 /** 勾选 id，用于表格与导出范围独立 */
@@ -816,25 +1108,317 @@ watch(filteredKeys, (list) => {
 })
 
 const keysForExport = computed(() => {
-  let keys = filteredKeys.value
-  if (exportStorageScope.value === 'encrypted') {
-    keys = keys.filter((k) => k.storage_type !== 'simple')
-  } else if (exportStorageScope.value === 'simple') {
-    keys = keys.filter((k) => k.storage_type === 'simple')
-  }
-  if (exportUsageScope.value === 'unused') {
-    keys = keys.filter((k) => Number(k.status) === 0)
-  } else if (exportUsageScope.value === 'used') {
-    keys = keys.filter((k) => [1, 2, 4].includes(Number(k.status)))
-  }
-  return keys
+  return filterCardsForExport(filteredKeys.value, {
+    storageScope: exportStorageScope.value,
+    usageScope: exportUsageScope.value,
+    createDateStart: exportCreateDateStart.value,
+    createDateEnd: exportCreateDateEnd.value,
+  })
 })
 
 const previewData = computed(() => {
   const src = keysForExport.value
   if (!src.length) return []
-  return processExportData(src.slice(0, 5))
+  return processCardExportData(src.slice(0, 5), selectedColumns.value, formatDate)
 })
+
+const IMPORT_HEADER_KEY = new Set(['卡密', 'card_key', 'key'])
+const IMPORT_HEADER_TYPE = new Set(['类型', 'card_type', 'type'])
+const IMPORT_HEADER_VALUE = new Set(['时长/次数', '时长', '次数', 'duration', 'total_count', 'value'])
+const IMPORT_HEADER_UNIT = new Set(['单位', 'duration_unit', 'unit'])
+
+function splitImportLine(line) {
+  return String(line ?? '')
+    .split(/[,;\t]/)
+    .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+}
+
+function isImportHeaderCell(value, headerSet) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return [...headerSet].some((h) => h.toLowerCase() === normalized)
+}
+
+function isImportHeaderRow(cells) {
+  if (!cells?.length) return false
+  return isImportHeaderCell(cells[0], IMPORT_HEADER_KEY)
+    || isImportHeaderCell(cells[1], IMPORT_HEADER_TYPE)
+    || cells.some((cell) => isImportHeaderCell(cell, IMPORT_HEADER_VALUE))
+}
+
+function resolveImportColumnIndexes(cells) {
+  const indexes = { key: 0, type: -1, value: -1, unit: -1 }
+  cells.forEach((cell, idx) => {
+    const normalized = String(cell ?? '').trim().toLowerCase()
+    if (isImportHeaderCell(cell, IMPORT_HEADER_KEY)) indexes.key = idx
+    else if (isImportHeaderCell(cell, IMPORT_HEADER_TYPE)) indexes.type = idx
+    else if (isImportHeaderCell(cell, IMPORT_HEADER_VALUE)) indexes.value = idx
+    else if (isImportHeaderCell(cell, IMPORT_HEADER_UNIT)) indexes.unit = idx
+  })
+  return indexes
+}
+
+function normalizeImportCardType(raw) {
+  const text = String(raw ?? '').trim().toLowerCase()
+  if (!text) return null
+  if (text === 'time' || text.includes('时间')) return 'time'
+  if (text === 'count' || text.includes('次数')) return 'count'
+  return null
+}
+
+function normalizeImportDurationUnit(raw) {
+  const text = String(raw ?? '').trim().toLowerCase()
+  if (!text) return null
+  if (text === 'permanent' || text.includes('永久')) return 'permanent'
+  if (text === 'hours' || text.includes('小时')) return 'hours'
+  if (text === 'days' || text.includes('天') || text.includes('日')) return 'days'
+  return null
+}
+
+function getImportDefaults() {
+  return {
+    card_type: importForm.card_type,
+    duration: importForm.duration,
+    duration_unit: importForm.duration_unit,
+    total_count: importForm.total_count,
+  }
+}
+
+function buildImportItem(cardKey, cardTypeRaw, valueRaw, unitRaw, defaults, fromFileSpec = false) {
+  const cardKeyText = String(cardKey ?? '').trim()
+  if (!cardKeyText) return null
+  if (isImportHeaderCell(cardKeyText, IMPORT_HEADER_KEY)) return null
+
+  const cardType = normalizeImportCardType(cardTypeRaw) || defaults.card_type
+  const valueText = String(valueRaw ?? '').trim()
+  const unitText = String(unitRaw ?? '').trim()
+  const hasFileSpec = fromFileSpec && (normalizeImportCardType(cardTypeRaw) || valueText || unitText)
+
+  if (cardType === 'count') {
+    const parsedCount = valueText ? Number.parseInt(valueText, 10) : Number.NaN
+    const totalCount = Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : defaults.total_count
+    return {
+      card_key: cardKeyText,
+      card_type: 'count',
+      duration: 0,
+      duration_unit: 'days',
+      total_count: totalCount,
+      _fromFileSpec: hasFileSpec,
+    }
+  }
+
+  let durationUnit = normalizeImportDurationUnit(unitText) || defaults.duration_unit
+  let duration = defaults.duration
+  if (valueText) {
+    if (normalizeImportDurationUnit(valueText) === 'permanent' || valueText.includes('永久')) {
+      durationUnit = 'permanent'
+      duration = 0
+    } else {
+      const parsedDuration = Number.parseInt(valueText, 10)
+      if (Number.isFinite(parsedDuration) && parsedDuration > 0) {
+        duration = parsedDuration
+      }
+    }
+  }
+  if (isPermanentDurationUnit(durationUnit)) {
+    duration = 0
+  }
+
+  return {
+    card_key: cardKeyText,
+    card_type: 'time',
+    duration,
+    duration_unit: durationUnit,
+    total_count: 0,
+    _fromFileSpec: hasFileSpec,
+  }
+}
+
+function parseImportRowCells(cells, columnIndexes, defaults, isHeaderRow = false) {
+  if (!Array.isArray(cells) || cells.length === 0 || isHeaderRow) return null
+  const keyIdx = columnIndexes?.key ?? 0
+  const cardKey = cells[keyIdx]
+  const typeIdx = columnIndexes?.type ?? -1
+  const valueIdx = columnIndexes?.value ?? -1
+  const unitIdx = columnIndexes?.unit ?? -1
+  const hasExtendedColumns = typeIdx >= 0 || valueIdx >= 0 || unitIdx >= 0 || cells.length >= 2
+
+  if (!hasExtendedColumns) {
+    return buildImportItem(cardKey, null, '', '', defaults, false)
+  }
+
+  const fallbackType = cells[1]
+  const fallbackValue = cells[2]
+  const fallbackUnit = cells[3]
+  return buildImportItem(
+    cardKey,
+    typeIdx >= 0 ? cells[typeIdx] : fallbackType,
+    valueIdx >= 0 ? cells[valueIdx] : fallbackValue,
+    unitIdx >= 0 ? cells[unitIdx] : fallbackUnit,
+    defaults,
+    true,
+  )
+}
+
+function mergeImportItems(items) {
+  const merged = []
+  const seen = new Set()
+  let hasSpecs = false
+  for (const item of items) {
+    if (!item?.card_key || seen.has(item.card_key)) continue
+    seen.add(item.card_key)
+    if (item._fromFileSpec) hasSpecs = true
+    const { _fromFileSpec, ...rest } = item
+    merged.push(rest)
+  }
+  return { items: merged, hasSpecs }
+}
+
+function parseImportRows(rows, defaults) {
+  if (!rows.length) return { items: [], hasSpecs: false }
+
+  let startIndex = 0
+  let columnIndexes = { key: 0, type: -1, value: -1, unit: -1 }
+  const firstCells = rows[0].map((cell) => String(cell ?? '').trim())
+  const maxCols = rows.reduce((max, row) => Math.max(max, row.length), 0)
+
+  if (isImportHeaderRow(firstCells)) {
+    columnIndexes = resolveImportColumnIndexes(firstCells)
+    startIndex = 1
+  } else if (maxCols >= 2) {
+    columnIndexes = { key: 0, type: 1, value: 2, unit: 3 }
+  }
+
+  const parsed = []
+  for (let i = startIndex; i < rows.length; i += 1) {
+    const cells = rows[i].map((cell) => String(cell ?? '').trim())
+    const item = parseImportRowCells(cells, columnIndexes, defaults, false)
+    if (item) parsed.push(item)
+  }
+  return mergeImportItems(parsed)
+}
+
+function parseImportTextContent(text, defaults) {
+  const lines = String(text ?? '').split(/\r?\n/).filter((line) => line.trim())
+  const rows = lines.map((line) => splitImportLine(line))
+  return parseImportRows(rows, defaults)
+}
+
+function formatImportPreviewRow(item) {
+  if (item.card_type === 'count') {
+    return `${item.card_key}  |  次数卡  |  ${item.total_count}次`
+  }
+  if (isPermanentDurationUnit(item.duration_unit)) {
+    return `${item.card_key}  |  时间卡  |  永久`
+  }
+  const unitLabel = item.duration_unit === 'hours' ? '小时' : '天'
+  return `${item.card_key}  |  时间卡  |  ${item.duration}${unitLabel}`
+}
+
+const importPreviewDisplay = computed(() =>
+  importPreview.value.slice(0, 5).map(formatImportPreviewRow).join('\n'),
+)
+
+watch(
+  () => [importForm.card_type, importForm.duration, importForm.duration_unit, importForm.total_count],
+  () => {
+    if (!importPreview.value.length || importFileHasSpecs.value) return
+    const defaults = getImportDefaults()
+    importPreview.value = importPreview.value.map((item) => {
+      const rebuilt = buildImportItem(item.card_key, null, '', '', defaults, false)
+      const { _fromFileSpec, ...rest } = rebuilt
+      return rest
+    })
+  },
+)
+
+function downloadImportTemplate() {
+  const wb = XLSX.utils.book_new()
+
+  const sampleRows = [
+    ['卡密', '类型', '时长/次数', '单位'],
+    ['VIP20260001', '时间卡', '30', '天'],
+    ['VIP20260002', '次数卡', '100', ''],
+    ['VIP20260003', '时间卡', '永久', '永久'],
+    ['VIP20260004', '时间卡', '24', '小时'],
+    ['VIP20260005', '时间卡', '30', '天'],
+  ]
+  const ws = XLSX.utils.aoa_to_sheet(sampleRows)
+  ws['!cols'] = [{ wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 10 }]
+  XLSX.utils.book_append_sheet(wb, ws, '卡密列表')
+
+  const instructionRows = [
+    ['卡密导入模板 — 填写说明'],
+    [''],
+    ['列说明：'],
+    ['  卡密 — 必填，每条一行'],
+    ['  类型 — 时间卡 / 次数卡（可留空，使用导入页默认值）'],
+    ['  时长/次数 — 时间卡填数字或「永久」；次数卡填总次数'],
+    ['  单位 — 时间卡填 天 / 小时 / 永久（可留空，默认「天」）'],
+    [''],
+    ['1. 也支持 .txt / .csv：仅卡密时每行一条；含类型时用逗号/分号/制表符分隔各列。'],
+    ['2. 首行标题可保留，导入时会自动识别并跳过。'],
+    ['3. 请勿在同一文件中重复填写相同卡密。'],
+  ]
+  const wsInfo = XLSX.utils.aoa_to_sheet(instructionRows)
+  wsInfo['!cols'] = [{ wch: 58 }]
+  XLSX.utils.book_append_sheet(wb, wsInfo, '填写说明')
+
+  XLSX.writeFile(wb, '卡密导入示例.xlsx')
+  ElMessage.success('示例模板已开始下载')
+}
+
+async function onImportFileChange(event) {
+  const file = event.target.files?.[0]
+  importPreview.value = []
+  importFileHasSpecs.value = false
+  if (!file) return
+  try {
+    const defaults = getImportDefaults()
+    const name = file.name.toLowerCase()
+    let result = { items: [], hasSpecs: false }
+    if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer, { type: 'array' })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+      const normalizedRows = rows
+        .filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim()))
+        .map((row) => row.map((cell) => String(cell ?? '').trim()))
+      result = parseImportRows(normalizedRows, defaults)
+    } else {
+      const text = await file.text()
+      result = parseImportTextContent(text, defaults)
+    }
+    importPreview.value = result.items
+    importFileHasSpecs.value = result.hasSpecs
+    if (importPreview.value.length === 0) {
+      ElMessage.warning('未从文件中解析到有效卡密')
+    }
+  } catch (e) {
+    ElMessage.error('文件解析失败：' + (e.message || '未知错误'))
+  } finally {
+    event.target.value = ''
+  }
+}
+
+function confirmImport() {
+  if (!importPreview.value.length) {
+    ElMessage.warning('请先选择并解析文件')
+    return
+  }
+  const payload = {
+    import_items: importPreview.value,
+    count: importPreview.value.length,
+    verify_method: importForm.verify_method,
+    allow_reverify: importForm.allow_reverify,
+    allow_self_unbind: importForm.allow_self_unbind,
+    use_encrypted: false,
+  }
+  emit('import-keys', payload)
+  showImportModal.value = false
+  importPreview.value = []
+  importFileHasSpecs.value = false
+}
 
 const exportData = async () => {
   if (selectedColumns.value.length === 0) return
@@ -847,13 +1431,13 @@ const exportData = async () => {
 
   exporting.value = true
   try {
-    const dataToExport = processExportData(allData)
+    const dataToExport = processCardExportData(allData, selectedColumns.value, formatDate)
     
     // 创建工作簿
     const wb = XLSX.utils.book_new()
     
     // 转换表头为中文
-    const header = selectedColumns.value.map(key => getColumnLabel(key))
+    const header = selectedColumns.value.map(key => getExportColumnLabel(key))
     const body = dataToExport.map(row => selectedColumns.value.map(key => row[key]))
     
     const ws = XLSX.utils.aoa_to_sheet([header, ...body])
@@ -878,7 +1462,7 @@ const currentPage = ref(1)
 const pageSize = ref(10)
 const jumpPage = ref(1)
 
-watch(machineCodeSearch, () => {
+watch([searchQuery, searchType, searchStorageScope], () => {
   currentPage.value = 1
   jumpPage.value = 1
 })
@@ -887,16 +1471,21 @@ const newKey = reactive({
   card_type: 'time',
   count: 1,
   duration: 30,
+  duration_unit: 'days',
   total_count: 100,
   verify_method: 'web',
   encryption_type: 'advanced',
   use_encrypted: true,
   key_length: 16,
+  key_prefix: '',
   manual_mode: false,
   manual_keys_text: '',
   allow_reverify: 1,
   stack_time_if_same_machine: false,
-  allow_self_unbind: false
+  allow_self_unbind: false,
+  require_device_unbind: false,
+  unbind_cooldown_hours: 0,
+  unbind_max_count: 0
 })
 
 const editingKey = reactive({
@@ -904,6 +1493,7 @@ const editingKey = reactive({
   card_key: '',
   card_type: 'time',
   duration: 30,
+  duration_unit: 'days',
   total_count: 100,
   remaining_count: 100,
   status: 0,
@@ -912,13 +1502,32 @@ const editingKey = reactive({
   allow_reverify: 1,
   machine_code: '',
   allow_self_unbind: false,
-  storage_type: 'encrypted'
+  require_device_unbind: false,
+  unbind_cooldown_hours: 0,
+  unbind_max_count: 0,
+  unbind_count: 0,
+  last_unbind_time: '',
+  storage_type: 'encrypted',
+  adjust_direction: 'add',
+  adjust_unit: 'days',
+  adjust_amount: 0
 })
 
-const rowSelectKey = (key) => `${key.storage_type || 'encrypted'}:${key.id}`
+const batchAdjustForm = reactive({
+  adjust_direction: 'add',
+  adjust_unit: 'days',
+  adjust_amount: 1
+})
 
-const isSimpleCard = (key) =>
-  key?.storage_type === 'simple' || key?.encryption_type === 'simple'
+watch(
+  () => editingKey.card_type,
+  (type) => {
+    editingKey.adjust_unit = type === 'count' ? 'times' : 'days'
+    editingKey.adjust_amount = 0
+  }
+)
+
+const rowSelectKey = (key) => `${key.storage_type || 'encrypted'}:${key.id}`
 
 const getEncryptLabel = (key) => (isSimpleCard(key) ? '简单' : '加密')
 
@@ -1034,6 +1643,86 @@ const batchDeleteSelected = async () => {
   })
 }
 
+const buildBatchTargetPayload = () => {
+  const selected = [...selectedIds.value]
+  if (selected.length) {
+    const parsed = selected.map(parseSelectKey)
+    return {
+      ids: parsed.map((p) => p.id),
+      storageTypes: parsed.map((p) => p.storage_type),
+      all: false
+    }
+  }
+  return { all: true }
+}
+
+const batchUnbindKeys = async () => {
+  const hasSelection = selectedIds.value.length > 0
+  const targetLabel = hasSelection
+    ? `选中的 ${selectedIds.value.length} 条`
+    : `全库 ${props.keys?.length || 0} 条`
+  try {
+    await ElMessageBox.confirm(
+      `确定对${targetLabel}卡密解绑机器码？仅已绑定设备码的会被清空，未绑定的不受影响。`,
+      '批量解绑确认',
+      {
+        confirmButtonText: '确定解绑',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+  emit('batch-unbind-keys', buildBatchTargetPayload())
+}
+
+const openBatchAdjustModal = () => {
+  batchAdjustForm.adjust_direction = 'add'
+  batchAdjustForm.adjust_unit = 'days'
+  batchAdjustForm.adjust_amount = 1
+  showBatchAdjustModal.value = true
+}
+
+const confirmBatchAdjust = async () => {
+  const amount = Number(batchAdjustForm.adjust_amount)
+  if (!amount || amount <= 0) {
+    ElMessage.warning('请输入大于 0 的数量')
+    return
+  }
+  const hasSelection = selectedIds.value.length > 0
+  const targetLabel = hasSelection
+    ? `选中的 ${selectedIds.value.length} 条`
+    : `全库 ${props.keys?.length || 0} 条`
+  const unitLabel =
+    batchAdjustForm.adjust_unit === 'hours'
+      ? '小时'
+      : batchAdjustForm.adjust_unit === 'days'
+        ? '天'
+        : '次'
+  const actionLabel = batchAdjustForm.adjust_direction === 'subtract' ? '扣减' : '增加'
+  try {
+    await ElMessageBox.confirm(
+      `确定对${targetLabel}卡密${actionLabel} ${amount} ${unitLabel}？时间卡与次数卡将按类型分别处理。`,
+      '批量加扣时确认',
+      {
+        confirmButtonText: '确定执行',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+  emit('batch-adjust-keys', {
+    ...buildBatchTargetPayload(),
+    adjust_direction: batchAdjustForm.adjust_direction,
+    adjust_unit: batchAdjustForm.adjust_unit,
+    adjust_amount: amount
+  })
+  showBatchAdjustModal.value = false
+}
+
 // 可见页码计算
 const visiblePages = computed(() => {
   const pages = []
@@ -1145,10 +1834,21 @@ const getStatusClass = (status) => {
   return statusClassMap[status] || 'unknown'
 }
 
+const formatDurationSpec = (key) => {
+  if (isPermanentDurationUnit(key?.duration_unit)) return '永久'
+  const amount = key?.duration ?? 0
+  const unit = key?.duration_unit === 'hours' ? 'hours' : 'days'
+  return unit === 'hours' ? `${amount}小时` : `${amount}天`
+}
+
 const createKeys = () => {
   const keyData = { ...newKey }
   if (keyData.card_type === 'time') {
     keyData.total_count = 0
+    if (isPermanentDurationUnit(keyData.duration_unit)) {
+      keyData.duration = 0
+      keyData.stack_time_if_same_machine = false
+    }
   }
   if (keyData.use_encrypted) {
     keyData.encryption_type = 'advanced'
@@ -1164,6 +1864,8 @@ const createKeys = () => {
         return
       }
       keyData.manual_card_keys = lines
+    } else {
+      keyData.key_prefix = (keyData.key_prefix || '').trim()
     }
   }
 
@@ -1172,16 +1874,21 @@ const createKeys = () => {
   newKey.card_type = 'time'
   newKey.count = 1
   newKey.duration = 30
+  newKey.duration_unit = 'days'
   newKey.total_count = 100
   newKey.verify_method = 'web'
   newKey.encryption_type = 'advanced'
   newKey.use_encrypted = true
   newKey.key_length = 16
+  newKey.key_prefix = ''
   newKey.manual_mode = false
   newKey.manual_keys_text = ''
   newKey.allow_reverify = 1
   newKey.stack_time_if_same_machine = false
   newKey.allow_self_unbind = false
+  newKey.require_device_unbind = false
+  newKey.unbind_cooldown_hours = 0
+  newKey.unbind_max_count = 0
 }
 
 const editKey = (key) => {
@@ -1190,6 +1897,11 @@ const editKey = (key) => {
     card_key: key.card_key,
     card_type: key.card_type,
     duration: key.duration,
+    duration_unit: key.duration_unit === 'hours'
+      ? 'hours'
+      : key.duration_unit === 'permanent'
+        ? 'permanent'
+        : 'days',
     total_count: key.total_count || 100,
     remaining_count: key.remaining_count || key.total_count || 100,
     status: key.status,
@@ -1198,13 +1910,30 @@ const editKey = (key) => {
     allow_reverify: key.allow_reverify !== undefined ? key.allow_reverify : 1,
     machine_code: key.machine_code || '',
     allow_self_unbind: key.allow_self_unbind === true || key.allow_self_unbind === 1,
-    storage_type: key.storage_type || 'encrypted'
+    require_device_unbind: key.require_device_unbind === true || key.require_device_unbind === 1,
+    unbind_cooldown_hours: key.unbind_cooldown_hours != null ? Number(key.unbind_cooldown_hours) : 0,
+    unbind_max_count: key.unbind_max_count != null ? Number(key.unbind_max_count) : 0,
+    unbind_count: key.unbind_count != null ? Number(key.unbind_count) : 0,
+    last_unbind_time: key.last_unbind_time || '',
+    storage_type: key.storage_type || 'encrypted',
+    adjust_direction: 'add',
+    adjust_unit: key.card_type === 'count' ? 'times' : 'days',
+    adjust_amount: 0
   })
   showEditKeyModal.value = true
 }
 
 const updateKey = () => {
-  emit('update-key', { ...editingKey })
+  const payload = { ...editingKey }
+  if (payload.card_type === 'time' && isPermanentDurationUnit(payload.duration_unit)) {
+    payload.duration = 0
+  }
+  if (!payload.adjust_amount || Number(payload.adjust_amount) <= 0) {
+    delete payload.adjust_amount
+    delete payload.adjust_unit
+    delete payload.adjust_direction
+  }
+  emit('update-key', payload)
   showEditKeyModal.value = false
 }
 
@@ -1275,6 +2004,22 @@ const copyKey = async (cardKey) => {
   font-weight: 600;
   color: #4a5568;
   white-space: nowrap;
+}
+
+.toolbar-select {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  color: #2d3748;
+  background: #fff;
+  min-width: 5.5rem;
+}
+
+.toolbar-select:focus {
+  outline: none;
+  border-color: #3182ce;
+  box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.15);
 }
 
 .toolbar-input {
@@ -1362,6 +2107,73 @@ const copyKey = async (cardKey) => {
 .header-actions {
   display: flex;
   gap: 1rem;
+}
+
+.import-preview {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.inline-fields {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.inline-fields input,
+.inline-fields select {
+  flex: 1;
+}
+
+.import-modal {
+  max-width: 520px;
+}
+
+.import-template-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: -0.25rem 0 1rem;
+}
+
+.import-template-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.import-template-btn:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.import-template-note {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.import-defaults-hint {
+  margin: -0.5rem 0 0.75rem;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
 }
 
 .export-modal {
@@ -1468,6 +2280,27 @@ const copyKey = async (cardKey) => {
   font-size: 0.75rem;
   color: #718096;
   line-height: 1.4;
+}
+
+.export-date-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.export-date-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #374151;
+}
+
+.export-date-field input[type='date'] {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.875rem;
 }
 
 .setting-group > .export-column-hint {
@@ -1972,9 +2805,28 @@ const copyKey = async (cardKey) => {
 }
 
 .duration-cell {
+  min-width: 120px;
   font-size: 0.75rem;
   line-height: 1.3;
   white-space: nowrap;
+}
+
+.duration-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.duration-input-row input {
+  flex: 1;
+  min-width: 5rem;
+  width: auto;
+}
+
+.duration-input-row select {
+  flex-shrink: 0;
+  width: auto;
+  min-width: 72px;
 }
 
 .time-countdown {
@@ -2124,6 +2976,18 @@ const copyKey = async (cardKey) => {
   align-items: start;
 }
 
+.create-form-col {
+  min-width: 0;
+}
+
+.create-form-col--fields .form-group-compact {
+  min-width: 0;
+}
+
+.create-duration-field .duration-input-row {
+  max-width: 220px;
+}
+
 .create-form-col--fields .form-row {
   display: grid;
   gap: 0.5rem 0.65rem;
@@ -2229,6 +3093,7 @@ const copyKey = async (cardKey) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .modal-header h3 {
@@ -2256,6 +3121,9 @@ const copyKey = async (cardKey) => {
 
 .modal-body {
   padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .form-group {
@@ -2288,6 +3156,29 @@ const copyKey = async (cardKey) => {
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
 }
 
+.adjust-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.adjust-row select,
+.adjust-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.batch-adjust-scope {
+  margin: 0 0 1rem;
+  color: #374151;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.batch-adjust-modal {
+  max-width: 420px;
+}
+
 .readonly-input {
   background: #f9fafb !important;
   color: #6b7280 !important;
@@ -2299,6 +3190,7 @@ const copyKey = async (cardKey) => {
   gap: 0.75rem;
   justify-content: flex-end;
   padding: 0 1.5rem 1.5rem;
+  flex-shrink: 0;
 }
 
 /* 分页样式 */

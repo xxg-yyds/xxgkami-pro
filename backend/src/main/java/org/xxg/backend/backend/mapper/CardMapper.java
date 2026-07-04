@@ -70,6 +70,36 @@ public class CardMapper {
         } catch (Exception e) {
             // exists
         }
+        try {
+            jdbcTemplate.execute("ALTER TABLE cards ADD COLUMN duration_unit VARCHAR(10) NOT NULL DEFAULT 'days' COMMENT 'time card unit: days or hours'");
+        } catch (Exception e) {
+            // exists
+        }
+        try {
+            jdbcTemplate.execute("ALTER TABLE cards ADD COLUMN require_device_unbind TINYINT(1) NOT NULL DEFAULT 0 COMMENT '自助解绑时须验证原设备码'");
+        } catch (Exception e) {
+            // exists
+        }
+        try {
+            jdbcTemplate.execute("ALTER TABLE cards ADD COLUMN unbind_cooldown_hours INT NOT NULL DEFAULT 0 COMMENT '自助解绑冷却间隔(小时)，0=不限'");
+        } catch (Exception e) {
+            // exists
+        }
+        try {
+            jdbcTemplate.execute("ALTER TABLE cards ADD COLUMN unbind_max_count INT NOT NULL DEFAULT 0 COMMENT '自助解绑次数上限，0=不限'");
+        } catch (Exception e) {
+            // exists
+        }
+        try {
+            jdbcTemplate.execute("ALTER TABLE cards ADD COLUMN unbind_count INT NOT NULL DEFAULT 0 COMMENT '已累计自助解绑次数'");
+        } catch (Exception e) {
+            // exists
+        }
+        try {
+            jdbcTemplate.execute("ALTER TABLE cards ADD COLUMN last_unbind_time DATETIME NULL COMMENT '最近一次自助解绑时间'");
+        } catch (Exception e) {
+            // exists
+        }
         System.out.println("Successfully updated cards table columns.");
     }
 
@@ -121,9 +151,7 @@ public class CardMapper {
     }
 
     /**
-     * 获取最近N天的卡密使用趋势
-     * @param days 天数
-     * @return 每日使用数量列表
+     * 获取最近N天的卡密使用趋势（按 use_time 统计已使用）
      */
     public List<Map<String, Object>> getUsageTrend(int days) {
         String sql = "SELECT DATE(use_time) as date, COUNT(*) as count " +
@@ -133,6 +161,45 @@ public class CardMapper {
                      "GROUP BY DATE(use_time) " +
                      "ORDER BY date ASC";
         
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            Map<String, Object> map = new HashMap<>();
+            map.put("date", rs.getDate("date").toString());
+            map.put("count", rs.getInt("count"));
+            return map;
+        }, days);
+    }
+
+    /**
+     * 获取最近N天新增未使用卡密趋势（按 create_time 统计 status=0）
+     */
+    public List<Map<String, Object>> getUnusedCreatedTrend(int days) {
+        String sql = "SELECT DATE(create_time) as date, COUNT(*) as count " +
+                     "FROM cards " +
+                     "WHERE create_time >= DATE_SUB(CURDATE(), INTERVAL ? DAY) " +
+                     "AND status = 0 " +
+                     "GROUP BY DATE(create_time) " +
+                     "ORDER BY date ASC";
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            Map<String, Object> map = new HashMap<>();
+            map.put("date", rs.getDate("date").toString());
+            map.put("count", rs.getInt("count"));
+            return map;
+        }, days);
+    }
+
+    /**
+     * 获取最近N天过期卡密趋势（按 expire_time 统计已到期）
+     */
+    public List<Map<String, Object>> getExpiredTrend(int days) {
+        String sql = "SELECT DATE(expire_time) as date, COUNT(*) as count " +
+                     "FROM cards " +
+                     "WHERE expire_time IS NOT NULL " +
+                     "AND expire_time >= DATE_SUB(CURDATE(), INTERVAL ? DAY) " +
+                     "AND expire_time <= NOW() " +
+                     "GROUP BY DATE(expire_time) " +
+                     "ORDER BY date ASC";
+
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             Map<String, Object> map = new HashMap<>();
             map.put("date", rs.getDate("date").toString());
@@ -192,8 +259,9 @@ public class CardMapper {
      */
     public void update(Card card) {
         String sql = "UPDATE cards SET status = ?, use_time = ?, expire_time = ?, remaining_count = ?, " +
-                     "device_id = ?, ip_address = ?, machine_code = ?, duration = ?, total_count = ?, allow_reverify = ?, " +
-                     "stack_time_if_same_machine = ?, allow_self_unbind = ?, merged_into_card_id = ? WHERE id = ?";
+                     "device_id = ?, ip_address = ?, machine_code = ?, duration = ?, duration_unit = ?, total_count = ?, allow_reverify = ?, " +
+                     "stack_time_if_same_machine = ?, allow_self_unbind = ?, require_device_unbind = ?, unbind_cooldown_hours = ?, " +
+                     "unbind_max_count = ?, unbind_count = ?, last_unbind_time = ?, merged_into_card_id = ? WHERE id = ?";
         jdbcTemplate.update(sql,
             card.getStatus(),
             card.getUseTime() != null ? Timestamp.valueOf(card.getUseTime()) : null,
@@ -203,10 +271,16 @@ public class CardMapper {
             card.getIpAddress(),
             card.getMachineCode(),
             card.getDuration(),
+            normalizeDurationUnitForDb(card.getDurationUnit()),
             card.getTotalCount(),
             card.getAllowReverify(),
             Boolean.TRUE.equals(card.getStackTimeIfSameMachine()) ? 1 : 0,
             Boolean.TRUE.equals(card.getAllowSelfUnbind()) ? 1 : 0,
+            Boolean.TRUE.equals(card.getRequireDeviceUnbind()) ? 1 : 0,
+            card.getUnbindCooldownHours() != null ? card.getUnbindCooldownHours() : 0,
+            card.getUnbindMaxCount() != null ? card.getUnbindMaxCount() : 0,
+            card.getUnbindCount() != null ? card.getUnbindCount() : 0,
+            card.getLastUnbindTime() != null ? Timestamp.valueOf(card.getLastUnbindTime()) : null,
             card.getMergedIntoCardId(),
             card.getId()
         );
@@ -227,6 +301,44 @@ public class CardMapper {
     }
 
     /**
+     * 查找指定前缀 + 固定总长度下，纯数字后缀的最大值（与 simple_cards 合并查重时使用）。
+     */
+    public long maxNumericSuffixForPrefix(String prefix, int totalLength) {
+        String p = prefix == null ? "" : prefix;
+        List<String> keys;
+        if (p.isEmpty()) {
+            keys = jdbcTemplate.queryForList(
+                    "SELECT card_key FROM cards WHERE LENGTH(card_key) = ? AND card_key REGEXP '^[0-9]+$'",
+                    String.class,
+                    totalLength
+            );
+        } else {
+            keys = jdbcTemplate.queryForList(
+                    "SELECT card_key FROM cards WHERE card_key LIKE ? AND LENGTH(card_key) = ?",
+                    String.class,
+                    p + "%",
+                    totalLength
+            );
+        }
+        long max = 0;
+        for (String key : keys) {
+            if (key == null || !key.startsWith(p)) {
+                continue;
+            }
+            String suffix = key.substring(p.length());
+            if (!suffix.matches("\\d+")) {
+                continue;
+            }
+            try {
+                max = Math.max(max, Long.parseLong(suffix));
+            } catch (NumberFormatException ignored) {
+                // skip
+            }
+        }
+        return max;
+    }
+
+    /**
      * 根据卡密列表查找
      * @param cardKeys 卡密列表
      * @return Card对象列表
@@ -244,8 +356,8 @@ public class CardMapper {
      * 批量插入卡密
      */
     public void batchInsert(List<Card> cards) {
-        String sql = "INSERT INTO cards (card_key, encrypted_key, card_type, duration, total_count, remaining_count, status, verify_method, encryption_type, allow_reverify, create_time, creator_type, creator_id, creator_name, api_key_id, stack_time_if_same_machine, allow_self_unbind, merged_into_card_id) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO cards (card_key, encrypted_key, card_type, duration, duration_unit, total_count, remaining_count, status, verify_method, encryption_type, allow_reverify, create_time, creator_type, creator_id, creator_name, api_key_id, stack_time_if_same_machine, allow_self_unbind, require_device_unbind, unbind_cooldown_hours, unbind_max_count, unbind_count, merged_into_card_id) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
             @Override
@@ -255,27 +367,32 @@ public class CardMapper {
                 ps.setString(2, card.getEncryptedKey());
                 ps.setString(3, card.getCardType());
                 ps.setInt(4, card.getDuration());
-                ps.setInt(5, card.getTotalCount());
-                ps.setInt(6, card.getRemainingCount());
-                ps.setInt(7, card.getStatus());
-                ps.setString(8, card.getVerifyMethod());
-                ps.setString(9, card.getEncryptionType());
-                ps.setInt(10, card.getAllowReverify());
-                ps.setTimestamp(11, Timestamp.valueOf(card.getCreateTime()));
-                ps.setString(12, card.getCreatorType());
-                ps.setLong(13, card.getCreatorId());
-                ps.setString(14, card.getCreatorName());
+                ps.setString(5, normalizeDurationUnitForDb(card.getDurationUnit()));
+                ps.setInt(6, card.getTotalCount());
+                ps.setInt(7, card.getRemainingCount());
+                ps.setInt(8, card.getStatus());
+                ps.setString(9, card.getVerifyMethod());
+                ps.setString(10, card.getEncryptionType());
+                ps.setInt(11, card.getAllowReverify());
+                ps.setTimestamp(12, Timestamp.valueOf(card.getCreateTime()));
+                ps.setString(13, card.getCreatorType());
+                ps.setLong(14, card.getCreatorId());
+                ps.setString(15, card.getCreatorName());
                 if (card.getApiKeyId() != null) {
-                    ps.setLong(15, card.getApiKeyId());
+                    ps.setLong(16, card.getApiKeyId());
                 } else {
-                    ps.setNull(15, java.sql.Types.BIGINT);
+                    ps.setNull(16, java.sql.Types.BIGINT);
                 }
-                ps.setInt(16, Boolean.TRUE.equals(card.getStackTimeIfSameMachine()) ? 1 : 0);
-                ps.setInt(17, Boolean.TRUE.equals(card.getAllowSelfUnbind()) ? 1 : 0);
+                ps.setInt(17, Boolean.TRUE.equals(card.getStackTimeIfSameMachine()) ? 1 : 0);
+                ps.setInt(18, Boolean.TRUE.equals(card.getAllowSelfUnbind()) ? 1 : 0);
+                ps.setInt(19, Boolean.TRUE.equals(card.getRequireDeviceUnbind()) ? 1 : 0);
+                ps.setInt(20, card.getUnbindCooldownHours() != null ? card.getUnbindCooldownHours() : 0);
+                ps.setInt(21, card.getUnbindMaxCount() != null ? card.getUnbindMaxCount() : 0);
+                ps.setInt(22, card.getUnbindCount() != null ? card.getUnbindCount() : 0);
                 if (card.getMergedIntoCardId() != null) {
-                    ps.setLong(18, card.getMergedIntoCardId());
+                    ps.setLong(23, card.getMergedIntoCardId());
                 } else {
-                    ps.setNull(18, java.sql.Types.BIGINT);
+                    ps.setNull(23, java.sql.Types.BIGINT);
                 }
             }
 
@@ -292,6 +409,15 @@ public class CardMapper {
     public List<Card> findByApiKeyId(Long apiKeyId) {
         String sql = "SELECT * FROM cards WHERE api_key_id = ? ORDER BY create_time DESC";
         return jdbcTemplate.query(sql, new CardRowMapper(), apiKeyId);
+    }
+
+    public int countByApiKeyId(Long apiKeyId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM cards WHERE api_key_id = ?",
+                Integer.class,
+                apiKeyId
+        );
+        return count != null ? count : 0;
     }
 
     public List<Card> findAll() {
@@ -364,6 +490,11 @@ public class CardMapper {
             card.setEncryptedKey(rs.getString("encrypted_key"));
             card.setCardType(rs.getString("card_type"));
             card.setDuration(rs.getInt("duration"));
+            try {
+                card.setDurationUnit(rs.getString("duration_unit"));
+            } catch (SQLException ignored) {
+                card.setDurationUnit("days");
+            }
             card.setTotalCount(rs.getInt("total_count"));
             card.setRemainingCount(rs.getInt("remaining_count"));
             card.setStatus(rs.getInt("status"));
@@ -410,6 +541,28 @@ public class CardMapper {
             } catch (SQLException ignored) {
             }
             try {
+                card.setRequireDeviceUnbind(rs.getInt("require_device_unbind") == 1);
+            } catch (SQLException ignored) {
+            }
+            try {
+                card.setUnbindCooldownHours(rs.getInt("unbind_cooldown_hours"));
+            } catch (SQLException ignored) {
+            }
+            try {
+                card.setUnbindMaxCount(rs.getInt("unbind_max_count"));
+            } catch (SQLException ignored) {
+            }
+            try {
+                card.setUnbindCount(rs.getInt("unbind_count"));
+            } catch (SQLException ignored) {
+            }
+            try {
+                if (rs.getTimestamp("last_unbind_time") != null) {
+                    card.setLastUnbindTime(rs.getTimestamp("last_unbind_time").toLocalDateTime());
+                }
+            } catch (SQLException ignored) {
+            }
+            try {
                 long merged = rs.getLong("merged_into_card_id");
                 if (!rs.wasNull()) {
                     card.setMergedIntoCardId(merged);
@@ -419,5 +572,15 @@ public class CardMapper {
             card.setStorageType("encrypted");
             return card;
         }
+    }
+
+    static String normalizeDurationUnitForDb(String unit) {
+        if (unit != null && "hours".equalsIgnoreCase(unit.trim())) {
+            return "hours";
+        }
+        if (unit != null && "permanent".equalsIgnoreCase(unit.trim())) {
+            return "permanent";
+        }
+        return "days";
     }
 }

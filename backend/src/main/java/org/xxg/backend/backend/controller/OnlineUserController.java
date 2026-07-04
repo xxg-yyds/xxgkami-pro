@@ -3,6 +3,7 @@ package org.xxg.backend.backend.controller;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.xxg.backend.backend.util.ClientIpUtils;
 import org.xxg.backend.backend.service.OnlineUserService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,7 +29,7 @@ public class OnlineUserController {
             String username = request.get("username");
             String nickname = request.get("nickname");
             String sessionId = httpRequest.getSession().getId();
-            String ipAddress = getClientIpAddress(httpRequest);
+            String ipAddress = ClientIpUtils.resolve(httpRequest);
             
             onlineUserService.userOnline(userId, username, nickname, sessionId, ipAddress);
             
@@ -96,22 +97,5 @@ public class OnlineUserController {
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }
-    }
-
-    /**
-     * 获取客户端IP地址
-     */
-    private String getClientIpAddress(HttpServletRequest request) {
-        String xForwardedFor = request.getHeader("X-Forwarded-For");
-        if (xForwardedFor != null && !xForwardedFor.isEmpty() && !"unknown".equalsIgnoreCase(xForwardedFor)) {
-            return xForwardedFor.split(",")[0];
-        }
-        
-        String xRealIp = request.getHeader("X-Real-IP");
-        if (xRealIp != null && !xRealIp.isEmpty() && !"unknown".equalsIgnoreCase(xRealIp)) {
-            return xRealIp;
-        }
-        
-        return request.getRemoteAddr();
     }
 }

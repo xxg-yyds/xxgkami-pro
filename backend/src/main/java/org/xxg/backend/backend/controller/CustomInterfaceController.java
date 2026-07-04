@@ -261,6 +261,9 @@ public class CustomInterfaceController {
             // Card related fields (only valid if card exists)
             case "remaining_time":
                 if (card == null) return "0秒";
+                if ("time".equals(card.getCardType()) && CardService.isPermanentUnit(card.getDurationUnit())) {
+                    return "永久";
+                }
                 if ("time".equals(card.getCardType()) && card.getExpireTime() != null) {
                     long seconds = Duration.between(LocalDateTime.now(), card.getExpireTime()).getSeconds();
                     if (seconds <= 0) return "0秒";

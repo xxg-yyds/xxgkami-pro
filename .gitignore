@@ -10,9 +10,11 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+release
 *.local
 
 # 首次安装完成标记（由向导生成）
+.xxgkami-setup-complete.json
 data/.xxgkami-setup.complete
 data/.xxgkami-version.json
 data/.xxgkami-kami-mysql56.sql

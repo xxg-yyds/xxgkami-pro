@@ -1,16 +1,8 @@
-<template>
+﻿<template>
   <div class="api-manage-page">
     <div class="section-header">
       <h2>API密钥管理</h2>
       <div class="header-actions">
-        <button type="button" class="btn-secondary" title="查看多语言调用核销接口示例" @click="openUseCardCodeModal">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-          代码实例
-        </button>
-        <button class="btn-secondary" @click="showDocsModal = true">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          接口文档
-        </button>
         <button class="btn-primary" @click="showCreateModal = true">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>
           生成API密钥
@@ -207,6 +199,13 @@
             <button type="button" class="btn-primary card-codes-generate-btn" @click="openExclusiveCreateModal">
               生成卡密
             </button>
+            <button
+              type="button"
+              class="btn-secondary card-codes-export-btn"
+              @click="showExclusiveExportModal = true"
+            >
+              导出
+            </button>
           </div>
           
           <div class="card-codes-list">
@@ -244,6 +243,131 @@
               <p>暂无专属卡密，点击上方按钮生成</p>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 专属卡密：导出（与卡密管理页逻辑一致） -->
+    <div v-if="showExclusiveExportModal" class="modal-overlay exclusive-export-overlay" @click="showExclusiveExportModal = false">
+      <div class="modal-content export-modal" @click.stop>
+        <div class="modal-header">
+          <h3>导出卡密数据</h3>
+          <button type="button" class="close-btn" @click="showExclusiveExportModal = false">×</button>
+        </div>
+        <div class="modal-body export-modal-body">
+          <p class="exclusive-export-api-hint">当前 API：{{ currentApiKey.name }}</p>
+          <div class="export-layout">
+            <div class="export-layout-left">
+              <div class="setting-group">
+                <h4>卡密加密方式</h4>
+                <p class="export-scope-hint">按存储类型筛选要导出的记录（加密卡密在 cards 表，简单卡密在 simple_cards 表）。</p>
+                <div class="export-segment-group export-segment-group--stack">
+                  <label
+                    v-for="opt in exportStorageScopeOptions"
+                    :key="opt.value"
+                    class="export-segment-option"
+                    :class="{ active: exclusiveExportStorageScope === opt.value }"
+                  >
+                    <input type="radio" v-model="exclusiveExportStorageScope" :value="opt.value">
+                    <span>{{ opt.label }}</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="setting-group">
+                <h4>导出范围</h4>
+                <p class="export-scope-hint">筛选当前 API 下专属卡密的使用状态。</p>
+                <div class="export-segment-group">
+                  <label
+                    v-for="opt in exportUsageScopeOptions"
+                    :key="opt.value"
+                    class="export-segment-option"
+                    :class="{ active: exclusiveExportUsageScope === opt.value }"
+                  >
+                    <input type="radio" v-model="exclusiveExportUsageScope" :value="opt.value">
+                    <span>{{ opt.label }}</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="setting-group">
+                <h4>创建时间</h4>
+                <p class="export-scope-hint">可选：仅导出指定日期范围内创建的卡密（留空表示不限制）。</p>
+                <div class="export-date-range">
+                  <label class="export-date-field">
+                    <span>起</span>
+                    <input v-model="exclusiveExportCreateDateStart" type="date">
+                  </label>
+                  <label class="export-date-field">
+                    <span>止</span>
+                    <input v-model="exclusiveExportCreateDateEnd" type="date">
+                  </label>
+                </div>
+              </div>
+
+              <div class="setting-group">
+                <h4>导出格式</h4>
+                <div class="export-segment-group">
+                  <label
+                    v-for="opt in exportFormatOptions"
+                    :key="opt.value"
+                    class="export-segment-option"
+                    :class="{ active: exclusiveExportFormat === opt.value }"
+                  >
+                    <input type="radio" v-model="exclusiveExportFormat" :value="opt.value">
+                    <span>{{ opt.label }}</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="setting-group">
+                <h4>选择导出列</h4>
+                <p class="export-column-hint">导入其它平台时通常只勾选「卡密」；每行一条密钥。</p>
+                <div class="checkbox-grid">
+                  <label v-for="col in cardExportColumns" :key="col.key" class="checkbox-label">
+                    <input type="checkbox" v-model="exclusiveSelectedColumns" :value="col.key">
+                    {{ col.label }}
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="export-layout-right preview-section">
+              <h4>数据预览</h4>
+              <p class="preview-meta">前 5 条 · 共 {{ exclusiveCardsForExport.length }} 条符合条件</p>
+              <div class="preview-table-container">
+                <table v-if="exclusiveExportPreview.length" class="preview-table">
+                  <thead>
+                    <tr>
+                      <th v-for="colKey in exclusiveSelectedColumns" :key="colKey">
+                        {{ getExportColumnLabel(colKey) }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, index) in exclusiveExportPreview" :key="index">
+                      <td v-for="colKey in exclusiveSelectedColumns" :key="colKey" :title="String(row[colKey] ?? '')">
+                        {{ row[colKey] }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div v-else class="preview-empty">当前筛选条件下暂无数据</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" @click="showExclusiveExportModal = false">取消</button>
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="exclusiveSelectedColumns.length === 0 || exclusiveExporting"
+            @click="exportExclusiveCards"
+          >
+            <i class="fas" :class="exclusiveExporting ? 'fa-spinner fa-spin' : 'fa-file-export'"></i>
+            {{ exclusiveExporting ? '导出中...' : '确认导出' }}
+          </button>
         </div>
       </div>
     </div>
@@ -436,120 +560,6 @@
             <div v-if="!currentApiKey.assignedUsers || currentApiKey.assignedUsers.length === 0" class="empty-users">
               <i class="fas fa-users"></i>
               <p>暂无分配用户，该API密钥可被所有用户使用</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- API Documentation Modal -->
-    <div v-if="showDocsModal" class="modal-overlay" @click="showDocsModal = false">
-      <div class="modal-content large-modal" @click.stop>
-        <div class="modal-header">
-          <h3>API 接口文档</h3>
-          <button class="close-btn" @click="showDocsModal = false">
-            <i class="fas fa-times"></i>
-          </button>
-        </div>
-        <div class="modal-body docs-body">
-          <div class="doc-section">
-            <h4>1. 使用卡密接口</h4>
-            <p>通过 API 密钥和卡密，直接使用/核销卡密。</p>
-            
-            <div class="endpoint-box">
-              <span class="method-badge post">POST</span>
-              <span class="method-badge get">GET</span>
-              <code class="url">/api/v1/use_card</code>
-            </div>
-
-            <h5>请求参数</h5>
-            <div class="table-container">
-              <table class="params-table">
-                <thead>
-                  <tr>
-                    <th>参数名</th>
-                    <th>必选</th>
-                    <th>类型</th>
-                    <th>说明</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>api_key</td>
-                    <td>是</td>
-                    <td>String</td>
-                    <td>您的 API 密钥 (api_key)</td>
-                  </tr>
-                  <tr>
-                    <td>card_key</td>
-                    <td>是</td>
-                    <td>String</td>
-                    <td>要使用的卡密</td>
-                  </tr>
-                  <tr>
-                    <td>machine_code</td>
-                    <td>否</td>
-                    <td>String</td>
-                    <td>机器码 (一机一码，首次使用时绑定)</td>
-                  </tr>
-                   <tr>
-                    <td>ip_address</td>
-                    <td>否</td>
-                    <td>String</td>
-                    <td>客户端IP (若不传则自动获取请求IP)</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <h5>响应示例</h5>
-            <pre class="code-block">
-{
-  "code": 200,
-  "message": "Card used successfully",
-  "success": true
-}</pre>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 核销接口多语言代码示例 -->
-    <div v-if="showUseCardCodeModal" class="modal-overlay" @click="showUseCardCodeModal = false">
-      <div class="modal-content large-modal code-examples-modal" @click.stop>
-        <div class="modal-header">
-          <h3>核销接口代码实例（use_card）</h3>
-          <button type="button" class="close-btn" @click="showUseCardCodeModal = false">
-            <i class="fas fa-times"></i>
-          </button>
-        </div>
-        <div class="modal-body code-examples-body">
-          <p class="code-examples-intro">{{ useCardCodeIntroText }}</p>
-          <p class="code-examples-hint">
-            当前环境 API 根路径参考：<code>{{ apiBaseUrlHint }}</code>
-            — 请将各示例中的 <code>BASE_URL</code> 换为此值（勿以 <code>/</code> 结尾）。
-          </p>
-          <div class="code-examples-layout">
-            <aside class="code-examples-lang" aria-label="语言列表">
-              <button
-                v-for="ex in API_USE_CARD_EXAMPLES"
-                :key="ex.id"
-                type="button"
-                class="code-lang-btn"
-                :class="{ active: selectedUseCardExampleId === ex.id }"
-                @click="selectedUseCardExampleId = ex.id"
-              >
-                {{ ex.label }}
-              </button>
-            </aside>
-            <div class="code-examples-panel">
-              <div class="code-examples-toolbar-inner">
-                <span class="code-examples-lang-title">{{ currentUseCardExample?.label }}</span>
-                <button type="button" class="btn-primary btn-code-copy" @click="copyUseCardExampleCode">
-                  复制代码
-                </button>
-              </div>
-              <pre class="code-block code-examples-pre"><code class="hljs" v-html="highlightedUseCardCodeHtml"></code></pre>
             </div>
           </div>
         </div>
@@ -809,6 +819,16 @@
           </div>
 
           <section class="interface-doc-section">
+            <h4>全局参数加密（AES-256-CBC）</h4>
+            <p>若在「API 开放中心 → 参数加密」中<strong>开启了全局参数加密</strong>，客户端调用本系统的自定义回调地址（如 <code>/api/custom/{apiKey}/use</code>）时，也须将业务参数加密后放入 <code>encrypted_payload</code>，不能直接传明文 query/body。</p>
+            <ul>
+              <li>Key、IV、填充模式、编码格式请在「API 开放中心 → 参数加密」页查看。</li>
+              <li>明文须为 JSON 对象，例如 <code>{"card_key":"...","machine_code":"..."}</code>（字段名须与上方「自定义参数配置」中的参数名一致）。</li>
+              <li>GET：<code>?encrypted_payload=Base64密文</code>；POST JSON：<code>{"encrypted_payload":"Base64密文"}</code></li>
+            </ul>
+          </section>
+
+          <section class="interface-doc-section">
             <h4>一、自定义参数配置（输入）</h4>
             <p>定义系统在核销成功后，向您的 Webhook 发起请求时<strong>附带哪些查询参数（GET）或表单/JSON 字段（POST）</strong>。</p>
             <ul>
@@ -859,9 +879,19 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { apiKeyApi, cardApi } from '../services/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { copyToClipboard } from '../utils/clipboard.js'
-import { highlightUseCardExample } from '../utils/useCardCodeHighlight.js'
-import { API_USE_CARD_INTRO, API_USE_CARD_EXAMPLES } from '../data/apiUseCardCodeExamples.js'
-import 'highlight.js/styles/github-dark.css'
+import * as XLSX from 'xlsx'
+import '../styles/card-export-modal.css'
+import {
+  CARD_EXPORT_COLUMNS,
+  EXPORT_FORMAT_OPTIONS,
+  EXPORT_STORAGE_SCOPE_OPTIONS,
+  EXPORT_USAGE_SCOPE_OPTIONS,
+  filterCardsForExport,
+  getExportColumnLabel,
+  mapApiKeyCard,
+  obfuscateCardKey,
+  processCardExportData,
+} from '../utils/cardExport.js'
 
 const props = defineProps({
   // apiKeys: Array, // No longer props, fetched internally
@@ -879,12 +909,21 @@ const allUsers = ref([])
 
 const showEditModal = ref(false)
 const showCreateModal = ref(false)
-const showDocsModal = ref(false)
-const showUseCardCodeModal = ref(false)
-const selectedUseCardExampleId = ref(API_USE_CARD_EXAMPLES[0]?.id ?? 'curl')
 const showInterfaceModal = ref(false)
 const showCardCodesModal = ref(false)
 const showExclusiveCreateModal = ref(false)
+const showExclusiveExportModal = ref(false)
+const exclusiveExporting = ref(false)
+const exclusiveExportFormat = ref('xlsx')
+const exclusiveExportUsageScope = ref('all')
+const exclusiveExportStorageScope = ref('all')
+const exclusiveExportCreateDateStart = ref('')
+const exclusiveExportCreateDateEnd = ref('')
+const exclusiveSelectedColumns = ref(['card_key'])
+const cardExportColumns = CARD_EXPORT_COLUMNS
+const exportStorageScopeOptions = EXPORT_STORAGE_SCOPE_OPTIONS
+const exportUsageScopeOptions = EXPORT_USAGE_SCOPE_OPTIONS
+const exportFormatOptions = EXPORT_FORMAT_OPTIONS
 const exclusiveCreating = ref(false)
 const showUsersModal = ref(false)
 const currentApiKey = ref({})
@@ -914,48 +953,6 @@ const docPanelLayout = reactive({
   w: 440,
   h: 420
 })
-
-const apiBaseUrlHint = computed(() => {
-  const raw = import.meta.env?.VITE_API_BASE_URL
-  let base = typeof raw === 'string' && raw.trim() ? raw.trim() : '/api'
-  base = base.replace(/\/+$/, '')
-  if (base.startsWith('http://') || base.startsWith('https://')) {
-    return base
-  }
-  if (typeof window !== 'undefined') {
-    const prefix = base.startsWith('/') ? base : `/${base}`
-    return `${window.location.origin}${prefix}`
-  }
-  return base
-})
-
-const useCardCodeIntroText = computed(() =>
-  API_USE_CARD_INTRO.replace(/\{BASE_URL\}/g, apiBaseUrlHint.value)
-)
-
-const currentUseCardExample = computed(
-  () =>
-    API_USE_CARD_EXAMPLES.find((e) => e.id === selectedUseCardExampleId.value) ?? API_USE_CARD_EXAMPLES[0]
-)
-
-const highlightedUseCardCodeHtml = computed(() => {
-  const ex = currentUseCardExample.value
-  if (!ex?.code) return ''
-  return highlightUseCardExample(ex.code, ex.id)
-})
-
-function openUseCardCodeModal() {
-  selectedUseCardExampleId.value = API_USE_CARD_EXAMPLES[0]?.id ?? 'curl'
-  showUseCardCodeModal.value = true
-}
-
-async function copyUseCardExampleCode() {
-  const code = currentUseCardExample.value?.code
-  if (!code) return
-  const ok = await copyToClipboard(code)
-  if (ok) ElMessage.success('代码已复制')
-  else ElMessage.error('复制失败')
-}
 
 watch(showInterfaceModal, (open) => {
   if (!open) {
@@ -1149,15 +1146,7 @@ const fetchApiKeys = async () => {
         // Fetch real cards count
         const cardsRes = await cardApi.getApiKeyCards(key.id);
         if (cardsRes.success) {
-           cardCodes = cardsRes.data.map(c => ({
-              id: c.id,
-              code: c.card_key,
-              status: c.status === 0 ? 'unused' : (c.status === 4 ? 'merged' : 'used'),
-              expiryDate: c.expire_time,
-              type: c.card_type === 'time' ? '时间卡' : '次数卡',
-              value: c.card_type === 'time' ? `${c.duration}天` : `${c.total_count}次`,
-              usedBy: c.device_id ? `Device ${c.device_id.substring(0, 6)}...` : null
-           }));
+           cardCodes = cardsRes.data.map(mapApiKeyCard)
         }
       } catch (e) {
         console.warn(`Failed to fetch cards for key ${key.id}`, e);
@@ -1327,16 +1316,7 @@ const fetchCardCodes = async (apiKeyId) => {
   try {
     const res = await cardApi.getApiKeyCards(apiKeyId)
     // Map to frontend format
-    const cards = res.data.map(c => ({
-       id: c.id,
-       code: c.card_key,
-       storage_type: c.storage_type || 'encrypted',
-       status: c.status === 0 ? 'unused' : 'used',
-       expiryDate: c.expire_time,
-       type: c.card_type === 'time' ? '时间卡' : '次数卡',
-       value: c.card_type === 'time' ? `${c.duration}天` : `${c.total_count}次`,
-       usedBy: c.device_id ? `Device ${c.device_id.substring(0, 6)}...` : null
-     }))
+    const cards = res.data.map(mapApiKeyCard)
     
     // Update currentApiKey.cardCodes
     if (currentApiKey.value.id === apiKeyId) {
@@ -1459,24 +1439,6 @@ const copyCardCode = async (code) => {
 }
 
 // 简单的前端混淆实现，与后端 CustomCardObfuscator 保持一致
-// 算法：URL编码 -> 反转 -> Base64 -> 替换字符
-const obfuscateCardKey = (rawKey) => {
-  if (!rawKey) return rawKey
-  try {
-    // 1. URL 编码
-    const encoded = encodeURIComponent(rawKey)
-    // 2. 字符串反转
-    const reversed = encoded.split('').reverse().join('')
-    // 3. Base64 编码 (使用 btoa，注意处理中文)
-    const base64 = btoa(reversed)
-    // 4. 字符替换
-    return base64.replace(/e/g, '*').replace(/U/g, '-')
-  } catch (e) {
-    console.error('Obfuscation failed:', e)
-    return rawKey
-  }
-}
-
 const copyEncryptedCardCode = async (code) => {
   const encrypted = obfuscateCardKey(code)
   const success = await copyToClipboard(encrypted)
@@ -1495,6 +1457,49 @@ const getCardCodeStatusText = (status) => {
     'expired': '已过期'
   }
   return map[status] || status
+}
+
+const exclusiveCardsForExport = computed(() => {
+  return filterCardsForExport(currentApiKey.value?.cardCodes || [], {
+    storageScope: exclusiveExportStorageScope.value,
+    usageScope: exclusiveExportUsageScope.value,
+    createDateStart: exclusiveExportCreateDateStart.value,
+    createDateEnd: exclusiveExportCreateDateEnd.value,
+  })
+})
+
+const exclusiveExportPreview = computed(() => {
+  const src = exclusiveCardsForExport.value
+  if (!src.length) return []
+  return processCardExportData(src.slice(0, 5), exclusiveSelectedColumns.value, formatDate)
+})
+
+const exportExclusiveCards = async () => {
+  if (!exclusiveSelectedColumns.value.length) return
+  const list = exclusiveCardsForExport.value
+  if (!list.length) {
+    ElMessage.warning('当前筛选条件下没有可导出的数据')
+    return
+  }
+  exclusiveExporting.value = true
+  try {
+    const rows = processCardExportData(list, exclusiveSelectedColumns.value, formatDate)
+    const header = exclusiveSelectedColumns.value.map(getExportColumnLabel)
+    const body = rows.map((row) => exclusiveSelectedColumns.value.map((key) => row[key]))
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet([header, ...body])
+    XLSX.utils.book_append_sheet(wb, ws, '卡密数据')
+    const safeName = (currentApiKey.value?.name || 'api-key').replace(/[\\/:*?"<>|]/g, '_')
+    const fileName = `${safeName}_专属卡密_${new Date().toISOString().slice(0, 10)}.${exclusiveExportFormat.value}`
+    XLSX.writeFile(wb, fileName)
+    ElMessage.success('导出成功')
+    showExclusiveExportModal.value = false
+  } catch (error) {
+    console.error('Export exclusive cards failed:', error)
+    ElMessage.error('导出失败')
+  } finally {
+    exclusiveExporting.value = false
+  }
 }
 
 // Interface Config Management
@@ -2515,9 +2520,220 @@ const copyPreviewUrl = async () => {
 .card-codes-header {
   display: flex;
   justify-content: flex-start;
+  gap: 0.75rem;
   margin-bottom: 1rem;
   padding-bottom: 0.75rem;
   border-bottom: 1px solid #e9ecef;
+}
+
+.exclusive-export-overlay {
+  z-index: 1100;
+}
+
+.exclusive-export-api-hint {
+  margin: 0 0 0.75rem;
+  padding: 0 0.15rem;
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.export-modal {
+  max-width: 920px;
+  width: 92%;
+  min-height: 32rem;
+  max-height: calc(100vh - 1.5rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.export-modal .modal-header {
+  padding: 0.85rem 1.25rem 0;
+  flex-shrink: 0;
+}
+
+.export-modal .modal-actions {
+  flex-shrink: 0;
+  padding: 0.75rem 1.25rem 1rem;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.export-modal-body {
+  padding: 1rem 1.25rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.export-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 0;
+  flex: 1;
+  min-height: 26rem;
+  max-height: min(calc(100vh - 10rem), 36rem);
+  align-items: stretch;
+}
+
+.export-layout-left {
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 100%;
+  padding-right: 1rem;
+  padding-bottom: 0.5rem;
+  border-right: 1px solid #e2e8f0;
+}
+
+.export-layout-right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  padding-left: 1rem;
+  overflow: hidden;
+}
+
+.setting-group {
+  margin-bottom: 0.85rem;
+}
+
+.setting-group h4 {
+  margin: 0 0 0.45rem 0;
+  color: #2d3748;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem 0.45rem;
+  padding-bottom: 0.25rem;
+}
+
+.checkbox-label,
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  color: #4a5568;
+  font-size: 0.875rem;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.radio-group.horizontal {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem 1.25rem;
+}
+
+.export-scope-hint,
+.export-column-hint {
+  margin: 0 0 0.45rem 0;
+  font-size: 0.75rem;
+  color: #718096;
+  line-height: 1.4;
+}
+
+.preview-section h4 {
+  margin: 0;
+  color: #2d3748;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.preview-meta {
+  margin: 0.2rem 0 0.5rem;
+  font-size: 0.75rem;
+  color: #718096;
+}
+
+.preview-table-container {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+
+.preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.preview-table th,
+.preview-table td {
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-table th {
+  background: #f7fafc;
+  font-weight: 600;
+  color: #4a5568;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.preview-empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 768px) {
+  .export-modal {
+    min-height: auto;
+    max-height: calc(100vh - 1rem);
+  }
+
+  .export-layout {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    max-height: none;
+  }
+
+  .export-layout-left {
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+    padding-right: 0;
+    padding-bottom: 0.75rem;
+    max-height: 45vh;
+  }
+
+  .export-layout-right {
+    padding-left: 0;
+    padding-top: 0.75rem;
+    min-height: 12rem;
+    max-height: 35vh;
+  }
+
+  .checkbox-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.card-codes-export-btn {
+  flex-shrink: 0;
 }
 
 .exclusive-create-hint {

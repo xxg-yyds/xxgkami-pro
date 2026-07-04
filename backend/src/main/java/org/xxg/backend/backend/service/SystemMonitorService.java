@@ -6,9 +6,13 @@ import org.springframework.stereotype.Service;
 import org.xxg.backend.backend.filter.RequestMonitorFilter;
 
 import java.io.File;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.OperatingSystemMXBean;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
@@ -30,6 +34,11 @@ public class SystemMonitorService {
 
     @Autowired
     private RequestMonitorFilter requestMonitorFilter;
+
+    /** Linux /proc/stat 上次采样，用于计算各核心 CPU 使用率 */
+    private long[] prevCoreIdle;
+    private long[] prevCoreTotal;
+    private int prevCoreCount = 0;
 
     // 用于计算QPS
     private long lastQuestionsCount = 0;
@@ -155,54 +164,250 @@ public class SystemMonitorService {
      */
     public Map<String, Object> getSystemStatus() {
         Map<String, Object> status = new HashMap<>();
-        
+
         try {
-            // 获取操作系统信息
             OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
+            int processors = osBean.getAvailableProcessors();
+            status.put("status", "online");
             status.put("osName", osBean.getName());
             status.put("osVersion", osBean.getVersion());
             status.put("osArch", osBean.getArch());
-            status.put("availableProcessors", osBean.getAvailableProcessors());
-            
-            // CPU使用率
-            double cpuUsage = 0;
+            status.put("availableProcessors", processors);
+            status.put("uptime", getUptime());
+            status.put("javaVersion", System.getProperty("java.version"));
+
+            com.sun.management.OperatingSystemMXBean sunOs = null;
             if (osBean instanceof com.sun.management.OperatingSystemMXBean) {
-                cpuUsage = ((com.sun.management.OperatingSystemMXBean) osBean).getCpuLoad() * 100;
+                sunOs = (com.sun.management.OperatingSystemMXBean) osBean;
             }
-            // 如果获取失败（返回负数），则保留为0或之前的逻辑
-            if (cpuUsage < 0) cpuUsage = 0;
-            status.put("cpuUsage", Math.round(cpuUsage * 100.0) / 100.0);
-            
-            // 内存信息
+
+            double systemCpu = 0;
+            double processCpu = 0;
+            if (sunOs != null) {
+                double raw = sunOs.getCpuLoad();
+                if (raw >= 0) {
+                    systemCpu = raw * 100;
+                }
+                double proc = sunOs.getProcessCpuLoad();
+                if (proc >= 0) {
+                    processCpu = proc * 100;
+                }
+            }
+            status.put("cpuUsage", round2(systemCpu));
+            status.put("processCpuUsage", round2(processCpu));
+
+            // 运行负载
+            Map<String, Object> load = readLoadAverage(processors, systemCpu);
+            status.put("load", load);
+
+            // CPU 各核心负载
+            List<Map<String, Object>> cores = readCpuCoreUsage(processors, systemCpu);
+            status.put("cpuCores", cores);
+
+            // 物理内存 + JVM
+            Map<String, Object> memory = new LinkedHashMap<>();
+            if (sunOs != null) {
+                long totalPhys = sunOs.getTotalMemorySize();
+                long freePhys = sunOs.getFreeMemorySize();
+                long usedPhys = totalPhys - freePhys;
+                double physPct = totalPhys > 0 ? usedPhys * 100.0 / totalPhys : 0;
+                memory.put("usagePercent", round2(physPct));
+                memory.put("used", formatBytes(usedPhys));
+                memory.put("total", formatBytes(totalPhys));
+                memory.put("free", formatBytes(freePhys));
+            } else {
+                memory.put("usagePercent", 0);
+                memory.put("used", "N/A");
+                memory.put("total", "N/A");
+                memory.put("free", "N/A");
+            }
             MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
-            long usedMemory = memoryBean.getHeapMemoryUsage().getUsed();
-            long maxMemory = memoryBean.getHeapMemoryUsage().getMax();
-            double memoryUsage = (double) usedMemory / maxMemory * 100;
-            
-            status.put("memoryUsage", Math.round(memoryUsage * 100.0) / 100.0);
-            status.put("usedMemory", formatBytes(usedMemory));
-            status.put("maxMemory", formatBytes(maxMemory));
-            
-            // 磁盘使用率
-            File root = new File(".");
+            long jvmUsed = memoryBean.getHeapMemoryUsage().getUsed();
+            long jvmMax = memoryBean.getHeapMemoryUsage().getMax();
+            memory.put("jvmUsed", formatBytes(jvmUsed));
+            memory.put("jvmMax", formatBytes(jvmMax));
+            memory.put("jvmUsagePercent", jvmMax > 0 ? round2(jvmUsed * 100.0 / jvmMax) : 0);
+            status.put("memory", memory);
+            status.put("memoryUsage", memory.get("usagePercent"));
+
+            // 磁盘（应用所在盘）
+            File root = resolveDiskRoot();
+            Map<String, Object> disk = new LinkedHashMap<>();
             long totalSpace = root.getTotalSpace();
             long freeSpace = root.getFreeSpace();
-            double diskUsage = 0;
-            if (totalSpace > 0) {
-                diskUsage = (double)(totalSpace - freeSpace) / totalSpace * 100;
+            long usedSpace = totalSpace - freeSpace;
+            double diskPct = totalSpace > 0 ? usedSpace * 100.0 / totalSpace : 0;
+            disk.put("usagePercent", round2(diskPct));
+            disk.put("used", formatBytes(usedSpace));
+            disk.put("total", formatBytes(totalSpace));
+            disk.put("free", formatBytes(freeSpace));
+            disk.put("path", root.getAbsolutePath());
+            status.put("disk", disk);
+            status.put("diskUsage", disk.get("usagePercent"));
+
+            double peak = Math.max(systemCpu, physPct(memory));
+            if (peak >= 85 || loadLevelScore(load) >= 85) {
+                status.put("health", "warning");
+            } else if (peak >= 70 || loadLevelScore(load) >= 70) {
+                status.put("health", "moderate");
+            } else {
+                status.put("health", "healthy");
             }
-            status.put("diskUsage", Math.round(diskUsage * 100.0) / 100.0);
-            
-            // JVM信息
-            status.put("javaVersion", System.getProperty("java.version"));
-            status.put("jvmName", System.getProperty("java.vm.name"));
-            
+
         } catch (Exception e) {
+            status.put("status", "offline");
             status.put("error", e.getMessage());
         }
-        
+
         status.put("lastCheck", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         return status;
+    }
+
+    private static double physPct(Map<String, Object> memory) {
+        Object v = memory.get("usagePercent");
+        return v instanceof Number ? ((Number) v).doubleValue() : 0;
+    }
+
+    private static double loadLevelScore(Map<String, Object> load) {
+        Object v = load.get("load1");
+        return v instanceof Number ? ((Number) v).doubleValue() * 100 : 0;
+    }
+
+    private File resolveDiskRoot() {
+        String userDir = System.getProperty("user.dir", ".");
+        File dir = new File(userDir);
+        if (dir.exists()) {
+            return dir;
+        }
+        return new File(".");
+    }
+
+    private Map<String, Object> readLoadAverage(int processors, double systemCpuFallback) {
+        Map<String, Object> load = new LinkedHashMap<>();
+        Path proc = Path.of("/proc/loadavg");
+        if (Files.isRegularFile(proc)) {
+            try {
+                String[] parts = Files.readString(proc, StandardCharsets.UTF_8).trim().split("\\s+");
+                if (parts.length >= 3) {
+                    double l1 = Double.parseDouble(parts[0]);
+                    double l5 = Double.parseDouble(parts[1]);
+                    double l15 = Double.parseDouble(parts[2]);
+                    load.put("load1", round2(l1));
+                    load.put("load5", round2(l5));
+                    load.put("load15", round2(l15));
+                    load.put("loadPercent", round2(Math.min(100, l1 / Math.max(1, processors) * 100)));
+                    load.put("level", loadLevelLabel(l1, processors));
+                    load.put("source", "linux");
+                    return load;
+                }
+            } catch (IOException | NumberFormatException ignored) {
+            }
+        }
+        double pseudo = systemCpuFallback / 100.0 * processors;
+        load.put("load1", round2(pseudo));
+        load.put("load5", round2(pseudo));
+        load.put("load15", round2(pseudo));
+        load.put("loadPercent", round2(systemCpuFallback));
+        load.put("level", loadLevelLabel(pseudo, processors));
+        load.put("source", "estimated");
+        return load;
+    }
+
+    private String loadLevelLabel(double load1, int processors) {
+        double ratio = load1 / Math.max(1, processors);
+        if (ratio < 0.5) {
+            return "低";
+        }
+        if (ratio < 0.85) {
+            return "中";
+        }
+        return "高";
+    }
+
+    private List<Map<String, Object>> readCpuCoreUsage(int processors, double systemCpuFallback) {
+        List<Map<String, Object>> cores = new ArrayList<>();
+        if (readLinuxProcStatCores(cores, processors)) {
+            return cores;
+        }
+        for (int i = 0; i < processors; i++) {
+            Map<String, Object> core = new HashMap<>();
+            core.put("index", i);
+            core.put("label", "CPU " + i);
+            core.put("usage", round2(systemCpuFallback));
+            cores.add(core);
+        }
+        return cores;
+    }
+
+    private boolean readLinuxProcStatCores(List<Map<String, Object>> cores, int processors) {
+        Path stat = Path.of("/proc/stat");
+        if (!Files.isRegularFile(stat)) {
+            return false;
+        }
+        try {
+            List<String> lines = Files.readAllLines(stat, StandardCharsets.UTF_8);
+            List<long[]> samples = new ArrayList<>();
+            for (String line : lines) {
+                if (!line.matches("cpu\\d+\\s+.*")) {
+                    continue;
+                }
+                String[] parts = line.trim().split("\\s+");
+                if (parts.length < 5) {
+                    continue;
+                }
+                long idle = Long.parseLong(parts[4]);
+                long total = 0;
+                for (int i = 1; i < parts.length; i++) {
+                    total += Long.parseLong(parts[i]);
+                }
+                samples.add(new long[]{idle, total});
+            }
+            if (samples.isEmpty()) {
+                return false;
+            }
+            int n = samples.size();
+            if (prevCoreIdle == null || prevCoreIdle.length != n) {
+                prevCoreIdle = new long[n];
+                prevCoreTotal = new long[n];
+                for (int i = 0; i < n; i++) {
+                    prevCoreIdle[i] = samples.get(i)[0];
+                    prevCoreTotal[i] = samples.get(i)[1];
+                }
+                prevCoreCount = n;
+                for (int i = 0; i < n; i++) {
+                    Map<String, Object> core = new HashMap<>();
+                    core.put("index", i);
+                    core.put("label", "CPU " + i);
+                    core.put("usage", 0);
+                    cores.add(core);
+                }
+                return true;
+            }
+            for (int i = 0; i < n; i++) {
+                long idle = samples.get(i)[0];
+                long total = samples.get(i)[1];
+                long idleDelta = idle - prevCoreIdle[i];
+                long totalDelta = total - prevCoreTotal[i];
+                double usage = 0;
+                if (totalDelta > 0) {
+                    usage = (totalDelta - idleDelta) * 100.0 / totalDelta;
+                }
+                prevCoreIdle[i] = idle;
+                prevCoreTotal[i] = total;
+                Map<String, Object> core = new HashMap<>();
+                core.put("index", i);
+                core.put("label", "CPU " + i);
+                core.put("usage", round2(Math.max(0, Math.min(100, usage))));
+                cores.add(core);
+            }
+            return true;
+        } catch (IOException | NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private static double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
     }
 
     /**

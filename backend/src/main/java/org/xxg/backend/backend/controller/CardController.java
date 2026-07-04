@@ -2,13 +2,19 @@ package org.xxg.backend.backend.controller;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.xxg.backend.backend.util.ClientIpUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.xxg.backend.backend.entity.ApiKey;
+import org.xxg.backend.backend.entity.Admin;
 import org.xxg.backend.backend.entity.Card;
+import org.xxg.backend.backend.service.AdminContextService;
+import org.xxg.backend.backend.service.AdminLogService;
 import org.xxg.backend.backend.service.ApiKeyService;
 import org.xxg.backend.backend.service.CardService;
+import org.xxg.backend.backend.util.AdminPermissions;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +37,17 @@ public class CardController {
     @Autowired
     private CustomCardObfuscator customCardObfuscator;
 
+    @Autowired
+    private AdminContextService adminContextService;
+
+    @Autowired
+    private AdminLogService adminLogService;
+
+    private Admin requireKeysAdmin() {
+        adminContextService.requirePermission(AdminPermissions.KEYS);
+        return adminContextService.requireCurrentAdmin();
+    }
+
     /**
      * 获取用户的卡密
      */
@@ -48,13 +65,17 @@ public class CardController {
      * 管理员批量创建卡密
      */
     @PostMapping("/admin/create")
-    public ResponseEntity<Map<String, Object>> createCards(@RequestBody CreateCardRequest request) {
+    public ResponseEntity<Map<String, Object>> createCards(@RequestBody CreateCardRequest request, HttpServletRequest httpRequest) {
         try {
-            // Default admin user for now (ID: 2, Username: admin)
-            // In a real app, retrieve from SecurityContext
-            Long adminId = 2L;
-            String adminName = "admin";
+            Admin admin = requireKeysAdmin();
+            Long adminId = admin.getId();
+            String adminName = admin.getUsername();
             String creatorType = "admin";
+
+            String durationUnit = request.getDurationUnit() != null ? request.getDurationUnit() : "days";
+            if ("time".equals(request.getCardType()) && !CardService.isPermanentUnit(durationUnit)) {
+                CardService.validateDurationForUnit(request.getDuration(), durationUnit);
+            }
 
             List<Card> cards;
             if (Boolean.FALSE.equals(request.getUseEncrypted())) {
@@ -72,7 +93,12 @@ public class CardController {
                         Boolean.TRUE.equals(request.getStackTimeIfSameMachine()),
                         Boolean.TRUE.equals(request.getAllowSelfUnbind()),
                         request.getKeyLength() != null ? request.getKeyLength() : 16,
-                        request.getManualCardKeys()
+                        request.getManualCardKeys(),
+                        request.getKeyPrefix(),
+                        durationUnit,
+                        request.getRequireDeviceUnbind(),
+                        request.getUnbindCooldownHours(),
+                        request.getUnbindMaxCount()
                 );
             } else {
                 String encType = request.getEncryptionType();
@@ -92,13 +118,92 @@ public class CardController {
                         adminName,
                         request.getApiKeyId(),
                         Boolean.TRUE.equals(request.getStackTimeIfSameMachine()),
-                        Boolean.TRUE.equals(request.getAllowSelfUnbind())
+                        Boolean.TRUE.equals(request.getAllowSelfUnbind()),
+                        durationUnit,
+                        request.getRequireDeviceUnbind(),
+                        request.getUnbindCooldownHours(),
+                        request.getUnbindMaxCount()
                 );
             }
+            adminLogService.log(admin, "card_create", "创建卡密 " + cards.size() + " 条", ClientIpUtils.resolve(httpRequest));
             return ResponseEntity.ok(Map.of("success", true, "data", cards));
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.internalServerError().body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/admin/import")
+    public ResponseEntity<Map<String, Object>> importCards(@RequestBody CreateCardRequest request, HttpServletRequest httpRequest) {
+        try {
+            Admin admin = requireKeysAdmin();
+            List<Card> cards;
+            if (request.getImportItems() != null && !request.getImportItems().isEmpty()) {
+                cards = cardService.importSimpleCards(
+                        request.getImportItems(),
+                        request.getVerifyMethod(),
+                        request.getAllowReverify(),
+                        "admin",
+                        admin.getId(),
+                        admin.getUsername(),
+                        request.getApiKeyId(),
+                        Boolean.TRUE.equals(request.getStackTimeIfSameMachine()),
+                        Boolean.TRUE.equals(request.getAllowSelfUnbind()),
+                        request.getRequireDeviceUnbind(),
+                        request.getUnbindCooldownHours(),
+                        request.getUnbindMaxCount()
+                );
+            } else {
+                if (request.getManualCardKeys() == null || request.getManualCardKeys().isEmpty()) {
+                    return ResponseEntity.badRequest().body(Map.of("success", false, "message", "请提供要导入的卡密列表 card_keys"));
+                }
+                List<String> keys = request.getManualCardKeys().stream()
+                        .filter(k -> k != null && !k.isBlank())
+                        .map(String::trim)
+                        .distinct()
+                        .toList();
+                if (keys.isEmpty()) {
+                    return ResponseEntity.badRequest().body(Map.of("success", false, "message", "没有有效的卡密"));
+                }
+                request.setCount(keys.size());
+                request.setUseEncrypted(false);
+                request.setManualCardKeys(keys);
+
+                String durationUnit = request.getDurationUnit() != null ? request.getDurationUnit() : "days";
+                if ("time".equals(request.getCardType()) && !CardService.isPermanentUnit(durationUnit)) {
+                    CardService.validateDurationForUnit(request.getDuration(), durationUnit);
+                }
+                cards = cardService.createSimpleCards(
+                        keys.size(),
+                        request.getCardType(),
+                        request.getDuration(),
+                        request.getTotalCount(),
+                        request.getVerifyMethod(),
+                        request.getAllowReverify(),
+                        "admin",
+                        admin.getId(),
+                        admin.getUsername(),
+                        request.getApiKeyId(),
+                        Boolean.TRUE.equals(request.getStackTimeIfSameMachine()),
+                        Boolean.TRUE.equals(request.getAllowSelfUnbind()),
+                        16,
+                        keys,
+                        null,
+                        durationUnit,
+                        request.getRequireDeviceUnbind(),
+                        request.getUnbindCooldownHours(),
+                        request.getUnbindMaxCount()
+                );
+            }
+            adminLogService.log(admin, "card_import", "导入卡密 " + cards.size() + " 条", ClientIpUtils.resolve(httpRequest));
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "data", cards,
+                    "imported", cards.size(),
+                    "message", "成功导入 " + cards.size() + " 条卡密"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
         }
     }
 
@@ -108,6 +213,7 @@ public class CardController {
     @GetMapping("/admin/all")
     public ResponseEntity<Map<String, Object>> getAllCards() {
         try {
+            adminContextService.requirePermission(AdminPermissions.KEYS);
             List<Card> cards = cardService.getAllCards();
             return ResponseEntity.ok(Map.of("success", true, "data", cards));
         } catch (Exception e) {
@@ -133,9 +239,12 @@ public class CardController {
     @PutMapping("/admin/{id}")
     public ResponseEntity<Map<String, Object>> updateCard(
             @PathVariable Long id,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest httpRequest) {
         try {
+            Admin admin = requireKeysAdmin();
             cardService.adminUpdateCard(id, body);
+            adminLogService.log(admin, "card_update", "更新卡密 ID=" + id, ClientIpUtils.resolve(httpRequest));
             return ResponseEntity.ok(Map.of("success", true, "message", "卡密更新成功"));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
@@ -234,6 +343,109 @@ public class CardController {
     }
 
     /**
+     * 管理员批量解绑机器码。body.all=true 时对全库操作，否则需提供 ids。
+     */
+    @PostMapping("/admin/batch-unbind")
+    public ResponseEntity<Map<String, Object>> batchUnbindCards(@RequestBody(required = false) Map<String, Object> body) {
+        try {
+            boolean allScope = body != null && Boolean.TRUE.equals(body.get("all"));
+            List<Long> ids = new ArrayList<>();
+            List<String> storageTypes = new ArrayList<>();
+            if (!allScope) {
+                parseBatchIdList(body, ids, storageTypes);
+                if (ids.isEmpty()) {
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("success", false, "message", "请勾选卡密或设置 all=true 解绑全库"));
+                }
+            }
+            int unbound = cardService.adminBatchUnbind(ids, storageTypes, allScope);
+            String msg = allScope
+                    ? "已对全库解绑 " + unbound + " 条已绑定卡密"
+                    : "已解绑 " + unbound + " 条卡密";
+            return ResponseEntity.ok(Map.of("success", true, "message", msg, "unbound", unbound));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * 管理员批量加时/扣时。时间卡支持 hours/days，次数卡支持 times。
+     */
+    @PostMapping("/admin/batch-adjust")
+    public ResponseEntity<Map<String, Object>> batchAdjustCards(@RequestBody(required = false) Map<String, Object> body) {
+        try {
+            if (body == null) {
+                return ResponseEntity.badRequest().body(Map.of("success", false, "message", "请提供请求体"));
+            }
+            String direction = body.get("adjust_direction") != null
+                    ? body.get("adjust_direction").toString() : null;
+            String unit = body.get("adjust_unit") != null ? body.get("adjust_unit").toString() : null;
+            Object amountObj = body.get("adjust_amount");
+            if (direction == null || unit == null || !(amountObj instanceof Number)) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("success", false, "message", "请提供 adjust_direction、adjust_unit、adjust_amount"));
+            }
+            int amount = ((Number) amountObj).intValue();
+            boolean allScope = Boolean.TRUE.equals(body.get("all"));
+            List<Long> ids = new ArrayList<>();
+            List<String> storageTypes = new ArrayList<>();
+            if (!allScope) {
+                parseBatchIdList(body, ids, storageTypes);
+                if (ids.isEmpty()) {
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("success", false, "message", "请勾选卡密或设置 all=true 对全库操作"));
+                }
+            }
+            Map<String, Integer> result = cardService.adminBatchAdjust(
+                    ids, storageTypes, allScope, direction, unit, amount);
+            int adjusted = result.getOrDefault("adjusted", 0);
+            int skipped = result.getOrDefault("skipped", 0);
+            String action = "subtract".equals(direction) ? "扣减" : "增加";
+            String msg = allScope
+                    ? String.format("全库已%s %d 条，跳过 %d 条", action, adjusted, skipped)
+                    : String.format("已%s %d 条，跳过 %d 条", action, adjusted, skipped);
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", msg,
+                    "adjusted", adjusted,
+                    "skipped", skipped
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void parseBatchIdList(Map<String, Object> body, List<Long> ids, List<String> storageTypes) {
+        if (body == null || !(body.get("ids") instanceof List<?> rawList)) {
+            return;
+        }
+        for (Object o : rawList) {
+            if (o instanceof Number num) {
+                ids.add(num.longValue());
+                storageTypes.add("encrypted");
+            } else if (o instanceof String str && !str.isBlank()) {
+                try {
+                    ids.add(Long.parseLong(str.trim()));
+                    storageTypes.add("encrypted");
+                } catch (NumberFormatException ignored) {
+                    // skip
+                }
+            } else if (o instanceof Map<?, ?> item) {
+                Object idObj = item.get("id");
+                if (idObj == null) {
+                    continue;
+                }
+                long parsedId = idObj instanceof Number n ? n.longValue() : Long.parseLong(idObj.toString());
+                ids.add(parsedId);
+                Object st = item.get("storage_type");
+                storageTypes.add(st != null ? st.toString() : "encrypted");
+            }
+        }
+    }
+
+    /**
      * 使用卡密
      */
     @RequestMapping(value = "/use", method = {RequestMethod.POST, RequestMethod.GET})
@@ -252,10 +464,7 @@ public class CardController {
         String apiKeyStr = params.get("api_key");
         String machineCode = params.get("machine_code");
 
-        String ipAddress = params.get("ip_address");
-        if (ipAddress == null || ipAddress.isEmpty()) {
-            ipAddress = httpRequest.getRemoteAddr();
-        }
+        String ipAddress = ClientIpUtils.resolve(httpRequest, params.get("ip_address"));
 
         if (cardKey == null || cardKey.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Card key is required"));
@@ -321,6 +530,9 @@ public class CardController {
         private String cardType;
         
         private int duration;
+
+        @JsonProperty("duration_unit")
+        private String durationUnit;
         
         @JsonProperty("total_count")
         private int totalCount;
@@ -345,6 +557,18 @@ public class CardController {
         @JsonProperty("allow_self_unbind")
         private Boolean allowSelfUnbind;
 
+        /** 自助解绑时须验证原设备码 */
+        @JsonProperty("require_device_unbind")
+        private Boolean requireDeviceUnbind;
+
+        /** 自助解绑冷却间隔（小时），0=不限 */
+        @JsonProperty("unbind_cooldown_hours")
+        private Integer unbindCooldownHours;
+
+        /** 自助解绑次数上限，0=不限 */
+        @JsonProperty("unbind_max_count")
+        private Integer unbindMaxCount;
+
         @JsonProperty("use_encrypted")
         private Boolean useEncrypted;
 
@@ -353,6 +577,14 @@ public class CardController {
 
         @JsonProperty("manual_card_keys")
         private List<String> manualCardKeys;
+
+        /** 简单卡密自动递增前缀（可选，如 VIP → VIP0001） */
+        @JsonProperty("key_prefix")
+        private String keyPrefix;
+
+        /** 逐条导入明细（含类型、时长/次数）；优先于 manual_card_keys */
+        @JsonProperty("import_items")
+        private List<ImportCardItem> importItems;
 
         // Getters and Setters
         public int getCount() { return count; }
@@ -363,6 +595,9 @@ public class CardController {
 
         public int getDuration() { return duration; }
         public void setDuration(int duration) { this.duration = duration; }
+
+        public String getDurationUnit() { return durationUnit; }
+        public void setDurationUnit(String durationUnit) { this.durationUnit = durationUnit; }
 
         public int getTotalCount() { return totalCount; }
         public void setTotalCount(int totalCount) { this.totalCount = totalCount; }
@@ -385,6 +620,15 @@ public class CardController {
         public Boolean getAllowSelfUnbind() { return allowSelfUnbind; }
         public void setAllowSelfUnbind(Boolean allowSelfUnbind) { this.allowSelfUnbind = allowSelfUnbind; }
 
+        public Boolean getRequireDeviceUnbind() { return requireDeviceUnbind; }
+        public void setRequireDeviceUnbind(Boolean requireDeviceUnbind) { this.requireDeviceUnbind = requireDeviceUnbind; }
+
+        public Integer getUnbindCooldownHours() { return unbindCooldownHours; }
+        public void setUnbindCooldownHours(Integer unbindCooldownHours) { this.unbindCooldownHours = unbindCooldownHours; }
+
+        public Integer getUnbindMaxCount() { return unbindMaxCount; }
+        public void setUnbindMaxCount(Integer unbindMaxCount) { this.unbindMaxCount = unbindMaxCount; }
+
         public Boolean getUseEncrypted() { return useEncrypted; }
         public void setUseEncrypted(Boolean useEncrypted) { this.useEncrypted = useEncrypted; }
 
@@ -393,5 +637,42 @@ public class CardController {
 
         public List<String> getManualCardKeys() { return manualCardKeys; }
         public void setManualCardKeys(List<String> manualCardKeys) { this.manualCardKeys = manualCardKeys; }
+
+        public String getKeyPrefix() { return keyPrefix; }
+        public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
+
+        public List<ImportCardItem> getImportItems() { return importItems; }
+        public void setImportItems(List<ImportCardItem> importItems) { this.importItems = importItems; }
+    }
+
+    public static class ImportCardItem {
+        @JsonProperty("card_key")
+        private String cardKey;
+
+        @JsonProperty("card_type")
+        private String cardType;
+
+        private int duration;
+
+        @JsonProperty("duration_unit")
+        private String durationUnit;
+
+        @JsonProperty("total_count")
+        private int totalCount;
+
+        public String getCardKey() { return cardKey; }
+        public void setCardKey(String cardKey) { this.cardKey = cardKey; }
+
+        public String getCardType() { return cardType; }
+        public void setCardType(String cardType) { this.cardType = cardType; }
+
+        public int getDuration() { return duration; }
+        public void setDuration(int duration) { this.duration = duration; }
+
+        public String getDurationUnit() { return durationUnit; }
+        public void setDurationUnit(String durationUnit) { this.durationUnit = durationUnit; }
+
+        public int getTotalCount() { return totalCount; }
+        public void setTotalCount(int totalCount) { this.totalCount = totalCount; }
     }
 }

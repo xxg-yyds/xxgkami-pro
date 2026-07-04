@@ -370,7 +370,8 @@ export const monitorApi = {
 
   async checkUpdate() {
     const token = localStorage.getItem('token');
-    const res = await fetch('/api/monitor/check-update', {
+    const url = `${API_BASE_URL}/monitor/check-update`;
+    const res = await fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     const data = await res.json().catch(() => ({}));
@@ -393,6 +394,16 @@ export const monitorApi = {
 
   async getOnlineUpdateStatus() {
     return await apiRequest('/monitor/update/status');
+  },
+
+  async getServerLocation() {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 45000)
+    try {
+      return await apiRequest('/monitor/server-location', { signal: controller.signal })
+    } finally {
+      clearTimeout(timeoutId)
+    }
   }
 };
 
@@ -581,6 +592,43 @@ export const cardApi = {
   },
 
   /**
+   * 管理员：批量解绑机器码（all=true 时对全库）
+   */
+  async batchUnbindCards({ ids = null, storageTypes = null, all = false } = {}) {
+    const body = { all: !!all };
+    if (!all && ids?.length) {
+      body.ids = storageTypes
+        ? ids.map((id, i) => ({ id, storage_type: storageTypes[i] || 'encrypted' }))
+        : ids;
+    }
+    return await apiRequest('/cards/admin/batch-unbind', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+  },
+
+  /**
+   * 管理员：批量加时/扣时（all=true 时对全库）
+   */
+  async batchAdjustCards({ ids = null, storageTypes = null, all = false, adjust_direction, adjust_unit, adjust_amount }) {
+    const body = {
+      all: !!all,
+      adjust_direction,
+      adjust_unit,
+      adjust_amount
+    };
+    if (!all && ids?.length) {
+      body.ids = storageTypes
+        ? ids.map((id, i) => ({ id, storage_type: storageTypes[i] || 'encrypted' }))
+        : ids;
+    }
+    return await apiRequest('/cards/admin/batch-adjust', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+  },
+
+  /**
    * 管理员：编辑卡密
    */
   async updateCard(cardId, data) {
@@ -613,11 +661,68 @@ export const cardApi = {
   /**
    * 公开页：解绑机器码与设备 ID（无需登录，须已绑定）
    */
-  async publicMachineUnbind(cardKey) {
+  async publicMachineUnbind(cardKey, machineCode) {
+    const body = { card_key: cardKey }
+    if (machineCode != null && String(machineCode).trim()) {
+      body.machine_code = String(machineCode).trim()
+    }
     return await apiRequest('/public/cards/machine-bind/unbind', {
       method: 'POST',
-      body: JSON.stringify({ card_key: cardKey })
+      body: JSON.stringify(body)
     });
+  },
+
+  /**
+   * 管理员：从文件解析后的卡密列表导入（简单卡密）
+   */
+  async importCards(payload) {
+    return await apiRequest('/cards/admin/import', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+};
+
+/**
+ * 管理员账号与日志 API
+ */
+export const adminApi = {
+  async listAccounts() {
+    return await apiRequest('/admin/accounts');
+  },
+
+  async listPermissionCodes() {
+    return await apiRequest('/admin/accounts/permissions');
+  },
+
+  async createAccount(data) {
+    return await apiRequest('/admin/accounts', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  },
+
+  async updateAccount(id, data) {
+    return await apiRequest(`/admin/accounts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  },
+
+  async deleteAccount(id) {
+    return await apiRequest(`/admin/accounts/${id}`, {
+      method: 'DELETE'
+    });
+  },
+
+  async listLogs(params = {}) {
+    const qs = new URLSearchParams();
+    if (params.keyword) qs.set('keyword', params.keyword);
+    if (params.operation_type) qs.set('operation_type', params.operation_type);
+    if (params.page) qs.set('page', String(params.page));
+    if (params.pageSize) qs.set('pageSize', String(params.pageSize));
+    const query = qs.toString();
+    return await apiRequest(`/admin/logs${query ? `?${query}` : ''}`);
   }
 };
 
@@ -777,6 +882,48 @@ export const apiKeyApi = {
   async getAllUsers() {
     return await apiRequest('/admin/users?size=9999');
   }
+};
+
+/**
+ * 开放平台 Token 管理（管理员 JWT）
+ */
+export const openPlatformTokenApi = {
+  async list() {
+    return await apiRequest('/admin/open-platform-tokens');
+  },
+
+  async create(data) {
+    return await apiRequest('/admin/open-platform-tokens', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  },
+
+  async revoke(id) {
+    return await this.delete(id)
+  },
+
+  async delete(id) {
+    return await apiRequest(`/admin/open-platform-tokens/${id}`, {
+      method: 'DELETE'
+    });
+  }
+};
+
+/**
+ * 开放平台全局参数加密设置（管理员 JWT）
+ */
+export const openApiEncryptionApi = {
+  async getConfig() {
+    return await apiRequest('/admin/open-api-encryption');
+  },
+
+  async saveConfig(data) {
+    return await apiRequest('/admin/open-api-encryption', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
 };
 
 /**

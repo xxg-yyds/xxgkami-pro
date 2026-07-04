@@ -335,20 +335,29 @@ public class SetupService {
                 }
 
                 long targetRows = countTableRows(serverConn, DB_NAME, table);
+                List<String> missingCols = listMissingColumnNames(serverConn, tempDb, DB_NAME, table);
                 Long missing = estimateMissingRows(serverConn, tempDb, DB_NAME, table);
                 item.put("changeType", "merge_rows");
                 item.put("seedRows", seedRows);
                 item.put("targetRows", targetRows);
                 item.put("estimatedInsertRows", missing);
-                if (missing != null && missing == 0) {
+                if (!missingCols.isEmpty()) {
+                    item.put("missingColumns", missingCols);
+                }
+                if (missing != null && missing == 0 && missingCols.isEmpty()) {
                     item.put("description", "表已存在，未发现可补缺行");
                     continue;
                 }
-                if (missing != null) {
-                    item.put("description", "表已存在，预计可插入约 " + missing + " 行（insert-ignore）");
-                } else {
-                    item.put("description", "表已存在，将尝试 insert-ignore 补缺行");
+                StringBuilder desc = new StringBuilder("表已存在");
+                if (!missingCols.isEmpty()) {
+                    desc.append("，将补字段: ").append(String.join(", ", missingCols));
                 }
+                if (missing != null && missing > 0) {
+                    desc.append("，预计可插入约 ").append(missing).append(" 行（insert-ignore）");
+                } else if (missingCols.isEmpty()) {
+                    desc.append("，将尝试 insert-ignore 补缺行");
+                }
+                item.put("description", desc.toString());
                 items.add(item);
             }
 
@@ -427,6 +436,80 @@ public class SetupService {
                              "' AND TABLE_NAME='" + table + "' AND COLUMN_NAME='" + column + "'")) {
             rs.next();
             return rs.getInt(1) > 0;
+        }
+    }
+
+    private record ColumnDef(String name, String columnType, String isNullable, String columnDefault,
+                             String extra, String comment) {
+        String toAddColumnSql() {
+            StringBuilder sb = new StringBuilder("`").append(name).append("` ").append(columnType);
+            if ("NO".equalsIgnoreCase(isNullable)) {
+                sb.append(" NOT NULL");
+            } else {
+                sb.append(" NULL");
+            }
+            if (columnDefault != null && !columnDefault.isBlank()) {
+                String def = columnDefault.trim();
+                if ("NULL".equalsIgnoreCase(def)) {
+                    sb.append(" DEFAULT NULL");
+                } else if (def.startsWith("CURRENT_TIMESTAMP") || def.matches("-?\\d+(\\.\\d+)?")) {
+                    sb.append(" DEFAULT ").append(def);
+                } else {
+                    sb.append(" DEFAULT '").append(def.replace("'", "''")).append("'");
+                }
+            }
+            if (comment != null && !comment.isBlank()) {
+                sb.append(" COMMENT '").append(comment.replace("'", "''")).append("'");
+            }
+            return sb.toString();
+        }
+    }
+
+    private List<ColumnDef> listTableColumns(Connection conn, String schema, String table) throws Exception {
+        String sql = "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT " +
+                "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='" + schema + "' AND TABLE_NAME='" + table +
+                "' ORDER BY ORDINAL_POSITION";
+        List<ColumnDef> cols = new ArrayList<>();
+        try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(sql)) {
+            while (rs.next()) {
+                cols.add(new ColumnDef(
+                        rs.getString(1),
+                        rs.getString(2),
+                        rs.getString(3),
+                        rs.getString(4),
+                        rs.getString(5),
+                        rs.getString(6)
+                ));
+            }
+        }
+        return cols;
+    }
+
+    private List<String> listMissingColumnNames(Connection conn, String fromSchema, String toSchema, String table)
+            throws Exception {
+        List<String> missing = new ArrayList<>();
+        for (ColumnDef col : listTableColumns(conn, fromSchema, table)) {
+            if (!columnExists(conn, toSchema, table, col.name())) {
+                missing.add(col.name());
+            }
+        }
+        return missing;
+    }
+
+    /** 智能更新前：将种子库中多出的字段 ALTER 到业务库，避免 insert 报 Unknown column */
+    private void syncMissingColumns(Connection conn, String fromSchema, String toSchema, String table) throws Exception {
+        for (ColumnDef col : listTableColumns(conn, fromSchema, table)) {
+            if (columnExists(conn, toSchema, table, col.name())) {
+                continue;
+            }
+            String extra = col.extra() != null ? col.extra().toLowerCase() : "";
+            if (extra.contains("auto_increment")) {
+                continue;
+            }
+            String alter = "ALTER TABLE `" + toSchema + "`.`" + table + "` ADD COLUMN " + col.toAddColumnSql();
+            try (Statement st = conn.createStatement()) {
+                st.executeUpdate(alter);
+            }
         }
     }
 
@@ -539,6 +622,7 @@ public class SetupService {
                     if (!exists) {
                         copyTableStructureAndData(host, port, user, pass, tempDb, DB_NAME, table, false);
                     } else {
+                        syncMissingColumns(serverConn, tempDb, DB_NAME, table);
                         copyTableStructureAndData(host, port, user, pass, tempDb, DB_NAME, table, true);
                     }
                 }
@@ -556,44 +640,82 @@ public class SetupService {
                                            String fromDb, String toDb, String table, boolean insertIgnoreOnly) throws Exception {
         if (insertIgnoreOnly) {
             if (commandExists("mysqldump") && commandExists("mysql")) {
-                runShell(List.of(
-                        "mysqldump", "-h" + host, "-P" + String.valueOf(port), "-u" + user,
-                        "-p" + pass, "--no-create-info", "--insert-ignore", "--complete-insert",
-                        fromDb, table
-                ), null, toDb, host, port, user, pass);
+                runShell(mysqldumpArgs(host, port, user, pass,
+                        "--no-create-info", "--insert-ignore", "--complete-insert",
+                        fromDb, table), null, toDb, host, port, user, pass);
                 return;
             }
         } else {
             if (commandExists("mysqldump") && commandExists("mysql")) {
-                runShell(List.of(
-                        "mysqldump", "-h" + host, "-P" + String.valueOf(port), "-u" + user,
-                        "-p" + pass, fromDb, table
-                ), null, toDb, host, port, user, pass);
+                runShell(mysqldumpArgs(host, port, user, pass, fromDb, table),
+                        null, toDb, host, port, user, pass);
                 return;
             }
         }
         throw new IllegalStateException("智能更新需要系统已安装 mysqldump 与 mysql 客户端");
     }
 
+    private List<String> mysqldumpArgs(String host, int port, String user, String pass, String... tail) {
+        List<String> cmd = new ArrayList<>(List.of(
+                "mysqldump",
+                "-h" + host,
+                "-P" + String.valueOf(port),
+                "-u" + user,
+                "-p" + pass,
+                "--column-statistics=0",
+                "--set-gtid-purged=OFF"
+        ));
+        cmd.addAll(List.of(tail));
+        return cmd;
+    }
+
     private void runShell(List<String> dumpCmd, String stdin, String targetDb,
                           String host, int port, String user, String pass) throws IOException, InterruptedException {
-        ProcessBuilder dump = new ProcessBuilder(dumpCmd);
-        dump.redirectErrorStream(true);
-        Process pDump = dump.start();
+        ProcessBuilder dumpPb = new ProcessBuilder(dumpCmd);
+        // 勿将 stderr 并入 stdout，否则警告文本会被 mysql 当 SQL 执行导致 mysql=1
+        dumpPb.redirectError(ProcessBuilder.Redirect.PIPE);
+        Process pDump = dumpPb.start();
+
         List<String> mysqlCmd = List.of(
                 "mysql", "-h" + host, "-P" + String.valueOf(port), "-u" + user, "-p" + pass, targetDb
         );
-        ProcessBuilder mysql = new ProcessBuilder(mysqlCmd);
-        mysql.redirectInput(ProcessBuilder.Redirect.PIPE);
-        Process pMysql = mysql.start();
+        ProcessBuilder mysqlPb = new ProcessBuilder(mysqlCmd);
+        mysqlPb.redirectInput(ProcessBuilder.Redirect.PIPE);
+        mysqlPb.redirectError(ProcessBuilder.Redirect.PIPE);
+        Process pMysql = mysqlPb.start();
+
+        Thread drainDumpErr = new Thread(() -> drainQuietly(pDump.getErrorStream()), "setup-dump-stderr");
+        drainDumpErr.setDaemon(true);
+        drainDumpErr.start();
+
         try (var in = pDump.getInputStream(); var out = pMysql.getOutputStream()) {
             in.transferTo(out);
         }
         int codeDump = pDump.waitFor();
+        drainDumpErr.join(5000);
+        String mysqlErr = new String(pMysql.getErrorStream().readAllBytes());
         int codeMysql = pMysql.waitFor();
         if (codeDump != 0 || codeMysql != 0) {
-            throw new IOException("mysqldump/mysql 管道执行失败: dump=" + codeDump + " mysql=" + codeMysql);
+            String detail = mysqlErr.isBlank() ? "" : "；mysql 输出: " + abbreviate(mysqlErr, 800);
+            throw new IOException("mysqldump/mysql 管道执行失败: dump=" + codeDump + " mysql=" + codeMysql + detail);
         }
+    }
+
+    private static void drainQuietly(java.io.InputStream in) {
+        if (in == null) {
+            return;
+        }
+        try {
+            in.transferTo(java.io.OutputStream.nullOutputStream());
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static String abbreviate(String text, int max) {
+        if (text == null || text.length() <= max) {
+            return text == null ? "" : text;
+        }
+        return text.substring(0, max) + "…";
     }
 
     private void backupDatabase(String host, int port, String user, String pass) throws Exception {

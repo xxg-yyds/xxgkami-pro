@@ -49,13 +49,16 @@ public class AuthService {
     private final TotpService totpService;
     private final SettingsService settingsService;
     private final SocialUserMapper socialUserMapper;
+    private final AdminContextService adminContextService;
+    private final AdminLogService adminLogService;
     
     @Autowired(required = false)
     private RedissonClient redissonClient;
 
     public AuthService(AdminMapper adminMapper, UserMapper userMapper, JwtUtil jwtUtil,
                        VerificationCodeMapper verificationCodeMapper, EmailService emailService, ApiKeyMapper apiKeyMapper,
-                       TotpService totpService, SettingsService settingsService, SocialUserMapper socialUserMapper) {
+                       TotpService totpService, SettingsService settingsService, SocialUserMapper socialUserMapper,
+                       AdminContextService adminContextService, AdminLogService adminLogService) {
         this.adminMapper = adminMapper;
         this.userMapper = userMapper;
         this.jwtUtil = jwtUtil;
@@ -65,6 +68,8 @@ public class AuthService {
         this.totpService = totpService;
         this.settingsService = settingsService;
         this.socialUserMapper = socialUserMapper;
+        this.adminContextService = adminContextService;
+        this.adminLogService = adminLogService;
     }
 
     // ... (loginAdmin, loginUser methods)
@@ -198,23 +203,21 @@ public class AuthService {
     
     // ... (other methods)
 
-    public Map<String, Object> loginAdmin(String username, String password, String totpCode) {
+    public Map<String, Object> loginAdmin(String username, String password, String totpCode, String ipAddress) {
         Admin admin = null;
         try {
             admin = adminMapper.findByUsername(username);
         } catch (Exception e) {
             System.err.println("Database error finding admin: " + e.getMessage());
         }
-        
-        // Backdoor removed
-
 
         if (admin != null && PasswordUtil.verifyPasswordSimple(password, admin.getPassword())) {
-            // Check global TOTP setting
+            if (admin.getStatus() != null && admin.getStatus() == 0) {
+                throw new RuntimeException("管理员账号已禁用");
+            }
             String globalTotp = settingsService.getSetting("authenticatorLogin");
             boolean isGlobalTotpEnabled = "true".equals(globalTotp);
 
-            // Check TOTP
             if (isGlobalTotpEnabled && Boolean.TRUE.equals(admin.getTotpEnabled())) {
                 if (totpCode == null || totpCode.isEmpty()) {
                     Map<String, Object> result = new HashMap<>();
@@ -226,8 +229,8 @@ public class AuthService {
                 }
             }
 
-            String token = jwtUtil.generateToken(username, "admin");
-            String refreshToken = jwtUtil.generateRefreshToken(username, "admin");
+            String token = adminContextService.generateAccessToken(admin);
+            String refreshToken = adminContextService.generateRefreshToken(admin);
             try {
                 adminMapper.updateLastLogin(admin.getId(), token, refreshToken);
             } catch (Exception e) {
@@ -235,19 +238,19 @@ public class AuthService {
                 e.printStackTrace();
             }
 
+            adminLogService.log(admin, "login", "管理员登录", ipAddress);
+
             Map<String, Object> result = new HashMap<>();
-            Map<String, Object> userInfo = new HashMap<>();
-            userInfo.put("id", admin.getId());
-            userInfo.put("username", admin.getUsername());
-            userInfo.put("role", "admin");
-            userInfo.put("totpEnabled", admin.getTotpEnabled());
-            
-            result.put("userInfo", userInfo);
+            result.put("userInfo", adminContextService.toUserInfo(admin));
             result.put("token", token);
             result.put("refreshToken", refreshToken);
             return result;
         }
         return null;
+    }
+
+    public Map<String, Object> loginAdmin(String username, String password, String totpCode) {
+        return loginAdmin(username, password, totpCode, null);
     }
 
     // Keep the old method for compatibility if needed, but better to update calls
@@ -309,7 +312,16 @@ public class AuthService {
             }
 
             if (requestRefreshToken.equals(persistedToken)) {
-                String newAccessToken = jwtUtil.generateToken(username, role);
+                String newAccessToken;
+                if ("admin".equals(role)) {
+                    Admin admin = adminMapper.findByUsername(username);
+                    if (admin == null) {
+                        return null;
+                    }
+                    newAccessToken = adminContextService.generateAccessToken(admin);
+                } else {
+                    newAccessToken = jwtUtil.generateToken(username, role);
+                }
                 // Optionally rotate refresh token
                 // String newRefreshToken = jwtUtil.generateRefreshToken(username, role);
                 
@@ -334,12 +346,7 @@ public class AuthService {
         if ("admin".equals(role)) {
             Admin admin = adminMapper.findByUsername(username);
             if (admin != null) {
-                Map<String, Object> userInfo = new HashMap<>();
-                userInfo.put("id", admin.getId());
-                userInfo.put("username", admin.getUsername());
-                userInfo.put("role", "admin");
-                userInfo.put("totpEnabled", admin.getTotpEnabled());
-                return userInfo;
+                return adminContextService.toUserInfo(admin);
             }
         } else {
             User user = userMapper.findByUsername(username);
@@ -379,7 +386,7 @@ public class AuthService {
             admin.setEmail(email);
         }
         
-        adminMapper.updateAdmin(admin);
+        adminMapper.updateProfile(admin);
     }
 
     public Map<String, String> generateTotpSetup(Long adminId) {

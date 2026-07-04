@@ -9,35 +9,19 @@
       @collapse-change="handleSidebarCollapse"
     />
 
-    <!-- 卡密创建进度条 -->
-    <div v-if="createProgress.visible" class="create-progress-bar">
-      <div class="progress-content">
-        <div class="progress-info">
-          <span class="progress-icon">
-            <svg v-if="createProgress.done" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" width="18" height="18"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-            <svg v-else class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
-          </span>
-          <span class="progress-text">
-            <template v-if="createProgress.done">
-              全部创建完成！成功 {{ createProgress.success }} 条<template v-if="createProgress.fail > 0">，失败 {{ createProgress.fail }} 条</template>
-            </template>
-            <template v-else>
-              正在创建卡密... {{ createProgress.current }} / {{ createProgress.total }}（剩余 {{ createProgress.total - createProgress.current }} 条）
-            </template>
-          </span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill" :style="{ width: createProgress.percent + '%' }"></div>
-        </div>
-        <button v-if="createProgress.done" class="progress-close" @click="createProgress.visible = false">&times;</button>
-      </div>
-    </div>
+    <!-- 创建完成：一键复制卡密 -->
+    <CreatedKeysDialog
+      :visible="createdKeysDialog.visible"
+      :keys="createdKeysDialog.keys"
+      @close="createdKeysDialog.visible = false"
+    />
 
     <!-- 主要内容区域 -->
     <main class="dashboard-main">
       <!-- 概览页面 -->
       <OverviewPage 
         v-if="activeTab === 'overview'"
+        :key="`page-${tabRefreshKey}`"
         :stats="stats"
         :carousel-data="carouselData"
         :features="features"
@@ -49,10 +33,14 @@
       <!-- 卡密管理页面 -->
       <KeysManagePage 
         v-if="activeTab === 'keys'"
+        :key="`page-${tabRefreshKey}`"
         :keys="keys"
         @create-keys="handleCreateKeys"
+        @import-keys="handleImportKeys"
         @delete-key="handleDeleteKey"
         @batch-delete-keys="handleBatchDeleteKeys"
+        @batch-unbind-keys="handleBatchUnbindKeys"
+        @batch-adjust-keys="handleBatchAdjustKeys"
         @toggle-key-status="handleToggleKeyStatus"
         @update-key="handleUpdateKey"
       />
@@ -60,16 +48,19 @@
       <!-- 定价管理页面 -->
       <PricingManagePage 
         v-if="activeTab === 'pricing'"
+        :key="`page-${tabRefreshKey}`"
       />
 
       <!-- 订单管理页面 -->
       <OrdersManagePage 
         v-if="activeTab === 'orders'"
+        :key="`page-${tabRefreshKey}`"
       />
 
       <!-- API管理页面 -->
       <ApiManagePage 
         v-if="activeTab === 'api'"
+        :key="`page-${tabRefreshKey}`"
         :api-keys="apiKeys"
         @generate-api-key="handleGenerateApiKey"
         @delete-api-key="handleDeleteApiKey"
@@ -77,19 +68,28 @@
         @toggle-api-key="handleToggleApiKey"
       />
 
+      <!-- API 开放中心 -->
+      <ApiOpenCenterPage
+        v-if="activeTab === 'api_open'"
+        :key="`page-${tabRefreshKey}`"
+      />
+
       <!-- 用户管理页面 -->
       <UserManagePage 
         v-if="activeTab === 'users'"
+        :key="`page-${tabRefreshKey}`"
       />
 
       <!-- 通知管理页面 -->
       <NotificationPage 
         v-if="activeTab === 'notification'"
+        :key="`page-${tabRefreshKey}`"
       />
 
       <!-- 系统设置页面 -->
       <SettingsPage 
         v-if="activeTab === 'settings'"
+        :key="`page-${tabRefreshKey}`"
         :user-info="userInfo"
         @save-settings="handleSaveSettings"
         @clear-cache="handleClearCache"
@@ -101,18 +101,33 @@
       <!-- 系统维护页面 -->
       <MaintenanceAdmin 
         v-if="activeTab === 'maintenance'"
+        :key="`page-${tabRefreshKey}`"
       />
 
       <!-- 系统信息页面 -->
       <SystemInfo 
         v-if="activeTab === 'system_info'"
+        :key="`page-${tabRefreshKey}`"
+      />
+
+      <!-- 管理员管理 -->
+      <AdminManagePage
+        v-if="activeTab === 'admins'"
+        :key="`page-${tabRefreshKey}`"
+        :user-info="userInfo"
+      />
+
+      <!-- 操作日志 -->
+      <AdminLogPage
+        v-if="activeTab === 'logs'"
+        :key="`page-${tabRefreshKey}`"
       />
     </main>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { mockAdmins, mockUsers, mockCards, mockApiKeys, mockSettings, mockSlides, mockFeatures, mockDeleteKey } from '../data/mockData.js'
 import { cardApi, statsApi } from '../services/api.js'
 import { ElMessage } from 'element-plus'
@@ -122,11 +137,16 @@ import KeysManagePage from './KeysManagePage.vue'
 import PricingManagePage from './PricingManagePage.vue'
 import OrdersManagePage from './OrdersManagePage.vue'
 import ApiManagePage from './ApiManagePage.vue'
+import ApiOpenCenterPage from './ApiOpenCenterPage.vue'
 import UserManagePage from './UserManagePage.vue'
 import SettingsPage from './SettingsPage.vue'
 import NotificationPage from './NotificationPage.vue'
 import MaintenanceAdmin from './MaintenanceAdmin.vue'
 import SystemInfo from './SystemInfo.vue'
+import AdminManagePage from './AdminManagePage.vue'
+import AdminLogPage from './AdminLogPage.vue'
+import CreatedKeysDialog from './CreatedKeysDialog.vue'
+import { hasAdminPermission, firstAllowedTab } from '../utils/adminPermission.js'
 
 const props = defineProps({
   userInfo: Object
@@ -136,6 +156,7 @@ const emit = defineEmits(['logout'])
 
 // 响应式数据
 const activeTab = ref('overview')
+const tabRefreshKey = ref(0)
 /** 与 NavigationBar 折叠状态同步，用于主区域 padding 动画 */
 const sidebarCollapsed = ref(false)
 
@@ -146,6 +167,8 @@ const currentSlide = ref(0)
 
 const stats = reactive({
   totalKeys: 0,
+  encryptedKeys: 0,
+  simpleKeys: 0,
   usedKeys: 0,
   activeKeys: 0,
   totalUsers: 0
@@ -156,15 +179,21 @@ const features = ref([])
 const keys = ref([])
 const apiKeys = ref([])
 
-const createProgress = reactive({
+const createdKeysDialog = reactive({
   visible: false,
-  current: 0,
-  total: 0,
-  success: 0,
-  fail: 0,
-  done: false,
-  percent: 0
+  keys: []
 })
+
+const extractCardKeysFromResult = (result) => {
+  if (!result?.success || !Array.isArray(result.data)) return []
+  return result.data.map((c) => c.card_key).filter(Boolean)
+}
+
+const openCreatedKeysDialog = (keysList) => {
+  if (!keysList?.length) return
+  createdKeysDialog.keys = keysList
+  createdKeysDialog.visible = true
+}
 
 // 创建模拟数据对象
 const mockData = {
@@ -181,13 +210,27 @@ const handleLogout = () => {
   emit('logout')
 }
 
-const handleTabChange = (tab, section) => {
-  console.log('Dashboard: 接收到标签页切换事件:', tab, 'Section:', section)
-  console.log('Dashboard: 当前activeTab:', activeTab.value)
+const refreshPageData = async (tab) => {
+  if (tab === 'overview') {
+    await loadDashboardStats()
+  } else if (tab === 'keys') {
+    await loadKeys()
+  }
+}
+
+const handleTabChange = async (tab, section) => {
+  if (!hasAdminPermission(props.userInfo, tab)) {
+    activeTab.value = firstAllowedTab(props.userInfo)
+    ElMessage.warning('无权限访问该页面')
+    return
+  }
   activeTab.value = tab
-  
+  tabRefreshKey.value += 1
+
+  await refreshPageData(tab)
+  await nextTick()
+
   if (section && tab === 'settings') {
-    // Wait for DOM update then scroll
     setTimeout(() => {
       const element = document.getElementById('settings-' + section)
       if (element) {
@@ -195,8 +238,6 @@ const handleTabChange = (tab, section) => {
       }
     }, 100)
   }
-  
-  console.log('Dashboard: 切换后activeTab:', activeTab.value)
 }
 
 const formatDate = (timestamp) => {
@@ -217,58 +258,57 @@ const handleSlideChange = (index) => {
 
 const handleCreateKeys = async (keyData) => {
   const totalCount = keyData.count || 1
-
-  // 少量（≤3）直接批量创建，不显示进度条
-  if (totalCount <= 3) {
-    try {
-      const result = await cardApi.createCards(keyData)
-      if (result.success) {
-        await loadKeys()
-        ElMessage.success(`成功创建 ${totalCount} 条卡密`)
-      }
-    } catch (error) {
-      console.error('生成卡密失败:', error)
-      ElMessage.error('生成卡密失败: ' + error.message)
-    }
-    return
+  let loadingMsg = null
+  if (totalCount > 3) {
+    loadingMsg = ElMessage({
+      message: `正在创建 ${totalCount} 条卡密...`,
+      duration: 0,
+      type: 'info'
+    })
   }
-
-  // 逐条创建，显示进度条
-  createProgress.visible = true
-  createProgress.current = 0
-  createProgress.total = totalCount
-  createProgress.success = 0
-  createProgress.fail = 0
-  createProgress.done = false
-  createProgress.percent = 0
-
-  const singleData = { ...keyData, count: 1 }
-
-  for (let i = 0; i < totalCount; i++) {
-    try {
-      const result = await cardApi.createCards(singleData)
-      if (result.success) {
-        createProgress.success++
-      } else {
-        createProgress.fail++
-      }
-    } catch (error) {
-      console.error(`创建第 ${i + 1} 条失败:`, error)
-      createProgress.fail++
+  try {
+    const result = await cardApi.createCards(keyData)
+    if (result.success) {
+      await loadKeys()
+      const created = extractCardKeysFromResult(result)
+      ElMessage.success(`成功创建 ${created.length || totalCount} 条卡密`)
+      openCreatedKeysDialog(created)
+    } else {
+      ElMessage.error(result.message || '生成卡密失败')
     }
-    createProgress.current = i + 1
-    createProgress.percent = Math.round(((i + 1) / totalCount) * 100)
+  } catch (error) {
+    console.error('生成卡密失败:', error)
+    ElMessage.error('生成卡密失败: ' + (error.message || '未知错误'))
+  } finally {
+    loadingMsg?.close()
   }
+}
 
-  createProgress.done = true
-  await loadKeys()
-
-  // 5 秒后自动关闭进度条
-  setTimeout(() => {
-    if (createProgress.done) {
-      createProgress.visible = false
+const handleImportKeys = async (keyData) => {
+  const totalCount = keyData.import_items?.length || keyData.manual_card_keys?.length || keyData.count || 0
+  let loadingMsg = null
+  if (totalCount > 3) {
+    loadingMsg = ElMessage({
+      message: `正在导入 ${totalCount} 条卡密...`,
+      duration: 0,
+      type: 'info'
+    })
+  }
+  try {
+    const result = await cardApi.importCards(keyData)
+    if (result.success) {
+      await loadKeys()
+      const created = extractCardKeysFromResult(result)
+      ElMessage.success(result.message || `成功导入 ${created.length || totalCount} 条卡密`)
+      openCreatedKeysDialog(created)
+    } else {
+      ElMessage.error(result.message || '导入失败')
     }
-  }, 5000)
+  } catch (error) {
+    ElMessage.error('导入失败: ' + (error.message || '未知错误'))
+  } finally {
+    loadingMsg?.close()
+  }
 }
 
 const handleDeleteKey = async ({ id, storage_type }) => {
@@ -302,6 +342,36 @@ const handleBatchDeleteKeys = async (payload) => {
   } catch (error) {
     console.error('批量删除卡密失败:', error)
     ElMessage.error(error.message || '批量删除卡密失败')
+  }
+}
+
+const handleBatchUnbindKeys = async (payload) => {
+  try {
+    const result = await cardApi.batchUnbindCards(payload)
+    if (result.success) {
+      ElMessage.success(result.message || `已解绑 ${result.unbound ?? 0} 条卡密`)
+      await loadKeys()
+    } else {
+      ElMessage.error(result.message || '批量解绑失败')
+    }
+  } catch (error) {
+    console.error('批量解绑失败:', error)
+    ElMessage.error(error.message || '批量解绑失败')
+  }
+}
+
+const handleBatchAdjustKeys = async (payload) => {
+  try {
+    const result = await cardApi.batchAdjustCards(payload)
+    if (result.success) {
+      ElMessage.success(result.message || '批量加扣时完成')
+      await loadKeys()
+    } else {
+      ElMessage.error(result.message || '批量加扣时失败')
+    }
+  } catch (error) {
+    console.error('批量加扣时失败:', error)
+    ElMessage.error(error.message || '批量加扣时失败')
   }
 }
 
@@ -346,6 +416,8 @@ const loadDashboardStats = async () => {
     const result = await statsApi.getDashboardStats()
     if (result) {
       stats.totalKeys = result.totalKeys
+      stats.encryptedKeys = result.encryptedKeys ?? 0
+      stats.simpleKeys = result.simpleKeys ?? 0
       stats.usedKeys = result.usedKeys
       stats.activeKeys = result.activeKeys
       stats.totalUsers = result.totalUsers
@@ -432,7 +504,9 @@ const handleCreateBackup = () => {
 
 // 初始化数据
 onMounted(async () => {
-  // 加载模拟数据
+  if (!hasAdminPermission(props.userInfo, activeTab.value)) {
+    activeTab.value = firstAllowedTab(props.userInfo)
+  }
   carouselData.value = mockData.carouselData
   features.value = mockData.features
   apiKeys.value = mockData.apiKeys

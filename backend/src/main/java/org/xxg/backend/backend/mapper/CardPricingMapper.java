@@ -91,6 +91,27 @@ public class CardPricingMapper {
         }
     }
 
+    public boolean existsByTypeAndValue(String type, int value, Integer excludeId) {
+        Integer count;
+        if (excludeId != null) {
+            count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM card_pricing WHERE type = ? AND value = ? AND id <> ?",
+                    Integer.class,
+                    type,
+                    value,
+                    excludeId
+            );
+        } else {
+            count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM card_pricing WHERE type = ? AND value = ?",
+                    Integer.class,
+                    type,
+                    value
+            );
+        }
+        return count != null && count > 0;
+    }
+
     public void insert(CardPricing pricing) {
         jdbcTemplate.update("INSERT INTO card_pricing (type, value, price, description) VALUES (?, ?, ?, ?)",
                 pricing.getType(), pricing.getValue(), pricing.getPrice(), pricing.getDescription());

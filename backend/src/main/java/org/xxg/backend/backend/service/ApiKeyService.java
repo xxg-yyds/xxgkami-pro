@@ -5,6 +5,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.xxg.backend.backend.entity.ApiKey;
 import org.xxg.backend.backend.entity.User;
 import org.xxg.backend.backend.mapper.ApiKeyMapper;
+import org.xxg.backend.backend.mapper.CardMapper;
+import org.xxg.backend.backend.mapper.SimpleCardMapper;
 
 import java.util.List;
 import java.util.UUID;
@@ -13,9 +15,13 @@ import java.util.UUID;
 public class ApiKeyService {
 
     private final ApiKeyMapper apiKeyMapper;
+    private final CardMapper cardMapper;
+    private final SimpleCardMapper simpleCardMapper;
 
-    public ApiKeyService(ApiKeyMapper apiKeyMapper) {
+    public ApiKeyService(ApiKeyMapper apiKeyMapper, CardMapper cardMapper, SimpleCardMapper simpleCardMapper) {
         this.apiKeyMapper = apiKeyMapper;
+        this.cardMapper = cardMapper;
+        this.simpleCardMapper = simpleCardMapper;
     }
 
     public List<ApiKey> getAllApiKeys() {
@@ -24,8 +30,7 @@ public class ApiKeyService {
             List<User> users = apiKeyMapper.getAssignedUsers(key.getId());
             key.setAssignedUsers(users);
             key.setUserCount(users.size());
-            // TODO: Count cards if needed. For now 0.
-            key.setCardCount(0); 
+            key.setCardCount(cardMapper.countByApiKeyId(key.getId()) + simpleCardMapper.countByApiKeyId(key.getId()));
         }
         return keys;
     }

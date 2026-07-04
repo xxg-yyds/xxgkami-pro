@@ -1,6 +1,6 @@
 {
-  "version": "1.0.7",
-  "buildDate": "2026-06-04",
+  "version": "1.0.8",
+  "buildDate": "2026-07-04",
   "repoUrl": "https://github.com/xxg-yyds/xxgkami-pro",
   "releaseDownloads": {
     "gitee": {
@@ -13,24 +13,55 @@
     }
   },
   "changelog": [
-    "1. 新增在线更新：系统信息页可一键更新；自动探测后端 JAR 与前端 dist 路径，支持手动修改确认后下载 Release 制品并替换，完成后自动重启后端",
-    "2. version.json 新增 releaseDownloads（Gitee/GitHub 各含 dist.zip 与 backend JAR 下载地址，支持 {version} 占位符）",
-    "3. 检查更新优化：并行 ping gitee.com 与 github.com，优先使用先连通的通道拉取 version.json，并提示所用通道",
-    "4. 首次安装向导完善：检测 kami 库是否存在 admins 表；无 admins 视为未初始化业务库，自动执行全新导入（跳过「覆盖/智能更新」策略页）",
-    "5. 首次安装向导：选 MySQL 5.6 时由 kami.sql 自动转译为 5.6 兼容脚本并显示转译进度，无需单独维护 kami_mysql56.sql",
-    "6. 种子 SQL 内嵌 JAR：打包时纳入 databaes/kami.sql，部署仅上传 JAR 亦可安装；支持解压到 data/.xxgkami-seed 及自定义 seed-sql-override",
-    "7. 安装/升级标记：以 data/.xxgkami-setup.complete 与 admins 表共同判定业务库就绪；未完成前跳过业务 JDBC 探测与 ApiKey 等初始化，避免空库报错",
-    "8. Spring Session：使用 spring_session 表名，启动时初始化会话表；修复 SPRING_SESSION 相关启动与清理错误",
-    "9. 新版升级检测：业务库就绪后按 data/.xxgkami-version.json 与远程版本比对，支持智能合并更新与版本升级向导",
-    "10. 引导页与加载页 UI：logo 蒙版渐隐背景；系统初始化向导支持版本升级模式与 5.6 SQL 转译进度展示",
-    "11. 卡密管理列表：缩短卡密列显示宽度；新增 IP 列（有 ip_address 显示 IP，否则显示「未绑定」）",
-    "12. 修复 MySQL 5.6 转译时 replaceAll「${1}」触发 Java 命名捕获组告警，改为安全替换逻辑",
-    "13. 修复宝塔等仅部署 JAR 环境提示「未找到 databaes/kami.sql」导致安装卡在 0% 的问题",
-    "14. 修复首次启动 Spring Session 等自动建表导致向导误报「库已存在需覆盖/合并」的问题",
-    "15. 远程 version.json Gitee 源地址调整为 xiaoxiaoguai-yyds/xxgkami-pro，与 Release 下载仓库一致"
+    "1. 新增自助解绑「原设备解绑」：开启后解绑须传入与原绑定一致的设备码；支持解绑冷却间隔与解绑次数上限（每张卡可单独配置）",
+    "2. 新增多管理员与权限管理：超级管理员可添加子管理员并分配功能权限；导航与页面按权限显隐",
+    "3. 新增操作日志：记录登录、卡密操作、管理员变更等，管理后台可分页查询",
+    "4. 新增卡密 Excel 导入：支持下载示例模板，可指定类型、时长或次数批量导入",
+    "5. 时间卡密新增「永久卡密」选项，列表与详情显示为「永久」",
+    "6. 美化添加管理员页面 UI，优化权限选择交互样式",
+    "7. 新增「API 开放中心」独立页面：接口文档从 API 管理页迁出，各板块独立分页展示（非锚点翻页）",
+    "8. API 开放中心文档中文化；新增 activate（开通授权）、unbind_device（解绑设备）、create_cards、create_api_key、health/ping 等开放平台接口文档与多语言示例",
+    "9. 新增开放平台 Token：API 开放中心可创建 Token（明文仅展示一次、可复制）；服务端仅存 SHA-256 哈希；每人最多 5 个，删除后立即失效",
+    "10. create_cards、create_api_key 接口改为须携带开放平台 Token（Authorization / X-Open-Token / open_token 参数）",
+    "11. 概览页顶部新增服务器物理位置：自动探测公网/内网 IP，支持国内（太平洋 IP 库）与国外（ipwho.is）双源查询；各区域独立异步加载互不阻塞",
+    "12. 系统信息页新增「共创使用者」名单：按 Bug 反馈贡献次数排序，默认展示前三，点击可查看完整弹窗名单",
+    "13. 新增 Electron 桌面版：支持 build:electron:safe 打包为 Windows NSIS 安装程序（XXG-KAMI-PRO-Setup-x.x.x.exe）",
+    "14. Electron 内置前端 dist 与后端 JAR（resources/runtime），无需从 Git 拉取即可离线运行",
+    "15. Electron 启动流程：首次不自动启动服务；先检测 Java 20+ 与 MySQL 8.0+，通过后点击「下一步」再启动前后端",
+    "16. Electron 环境页新增 MySQL 连接配置与在线检测（密码失焦自动测试），配置持久化到用户数据目录",
+    "17. Electron 启动进度弹窗：分步展示 HTML 前端加载、Java 后端启动、API 健康检查，附带日志与命令输出",
+    "18. Electron 8080 端口冲突检测：显示占用进程 PID，支持「一键清除并重新启动」；修复终端与程序重复启动导致的端口占用",
+    "19. Electron 前端改为 HTTP 静态服务（127.0.0.1:5174），便于云桌面端口映射与公网访问",
+    "20. Electron 前端在独立 CMD 终端启动（标题 XXG-KAMI Frontend），与后端终端并列显示日志",
+    "21. Electron 安装包使用自定义 icon.ico；build:electron:safe 输出至 xxgkami-electron-release 目录",
+    "22. Electron 首次配置完成后写入标记文件，再次启动跳过环境检测页并静默拉起后端",
+    "23. 新增开放平台全局 AES-256-CBC 加解密：入参/出参独立开关，可单独启用或组合使用",
+    "24. 入参加密：业务参数 JSON 加密后放入 encrypted_payload；出参加密：响应包装为 response_encrypted + encrypted_payload",
+    "25. API 开放中心新增「参数加密」配置：展示 Key/IV/算法规范，美化双开关 UI，并提供 JS/Java/Python 加解密对接文档",
+    "26. 修复 Electron 桌面版「检查更新」Failed to fetch；新增 electron/npm 国内镜像加速打包",
+    "27. 桌面版启动顺序优化：后端就绪后再确认前端 HTTP；8080 端口检测改用 netstat/tasklist/taskkill"
   ],
   "updateScripts": {
     "cn": "curl -O https://gitee.com/xxg-yyds/xxgkami-pro/raw/master/install.sh && chmod +x install.sh && sudo ./install.sh",
     "global": "curl -O https://raw.githubusercontent.com/xxg-yyds/xxgkami-pro/refs/heads/master/install.sh && chmod +x install.sh && sudo ./install.sh"
+  },
+  "electron": {
+    "version": "1.0.1",
+    "buildDate": "2026-07-04",
+    "productName": "XXG-KAMI-PRO",
+    "releaseDownloads": {
+      "gitee": {
+        "setupExe": "https://gitee.com/xiaoxiaoguai-yyds/xxgkami-pro/releases/download/electron-v{version}/XXG-KAMI-PRO-Setup-{version}.exe"
+      },
+      "github": {
+        "setupExe": "https://github.com/xxg-yyds/xxgkami-pro/releases/download/electron-v{version}/XXG-KAMI-PRO-Setup-{version}.exe"
+      }
+    },
+    "changelog": [
+      "1. 新增启动时自动检查桌面版更新，支持下载进度与确认安装",
+      "2. 支持覆盖更新与全新安装两种模式",
+      "3. 更新完成后可一键删除下载的安装包",
+      "4. 软件信息：公司「小小怪」，官网 https://www.xxgkami.com/"
+    ]
   }
 }

@@ -34,6 +34,43 @@ public class JwtUtil {
         return createToken(claims, username, REFRESH_EXPIRATION_TIME);
     }
 
+    public String generateAdminToken(String username, Long adminId, boolean isSuper, String permissionsCsv) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("role", "admin");
+        claims.put("type", "access");
+        claims.put("adminId", adminId);
+        claims.put("isSuper", isSuper);
+        if (permissionsCsv != null) {
+            claims.put("permissions", permissionsCsv);
+        }
+        return createToken(claims, username, EXPIRATION_TIME);
+    }
+
+    public String generateAdminRefreshToken(String username, Long adminId, boolean isSuper, String permissionsCsv) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("role", "admin");
+        claims.put("type", "refresh");
+        claims.put("adminId", adminId);
+        claims.put("isSuper", isSuper);
+        if (permissionsCsv != null) {
+            claims.put("permissions", permissionsCsv);
+        }
+        return createToken(claims, username, REFRESH_EXPIRATION_TIME);
+    }
+
+    public Long extractAdminId(String token) {
+        Object v = extractAllClaims(token).get("adminId");
+        if (v instanceof Number) {
+            return ((Number) v).longValue();
+        }
+        return null;
+    }
+
+    public boolean extractIsSuper(String token) {
+        Object v = extractAllClaims(token).get("isSuper");
+        return Boolean.TRUE.equals(v);
+    }
+
     private String createToken(Map<String, Object> claims, String subject, long expiration) {
         return Jwts.builder()
                 .setClaims(claims)

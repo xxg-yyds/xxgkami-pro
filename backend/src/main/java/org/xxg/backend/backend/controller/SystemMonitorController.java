@@ -6,6 +6,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.xxg.backend.backend.service.RemoteUpdateService;
+import org.xxg.backend.backend.service.ServerLocationService;
 import org.xxg.backend.backend.service.SystemMonitorService;
 
 import java.util.Map;
@@ -23,6 +24,9 @@ public class SystemMonitorController {
 
     @Autowired
     private RemoteUpdateService remoteUpdateService;
+
+    @Autowired
+    private ServerLocationService serverLocationService;
 
     /**
      * 获取数据库状态信息
@@ -73,6 +77,21 @@ public class SystemMonitorController {
             return ResponseEntity.ok(onlineUsers);
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * 获取服务器公网 IP 及物理位置（国内 / 国外双源查询）
+     */
+    @GetMapping("/server-location")
+    public ResponseEntity<Map<String, Object>> getServerLocation() {
+        try {
+            return ResponseEntity.ok(serverLocationService.getServerLocation());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "success", false,
+                    "message", e.getMessage() != null ? e.getMessage() : "查询失败"
+            ));
         }
     }
 

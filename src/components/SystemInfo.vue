@@ -20,10 +20,17 @@
               <el-button type="primary" link size="small" @click="checkUpdate" :loading="checking">检查更新</el-button>
             </div>
           </el-descriptions-item>
-          <el-descriptions-item label="发布时间">2026-06-04</el-descriptions-item>
+          <el-descriptions-item v-if="isDesktop" label="桌面版版本">
+            <div class="version-row">
+              <span>v{{ desktopVersion }}</span>
+              <span v-if="bundledAppVersion" class="version-sub">内置业务 v{{ bundledAppVersion }}</span>
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item label="发布时间">2026-07-04</el-descriptions-item>
+          <el-descriptions-item label="公司">小小怪</el-descriptions-item>
           <el-descriptions-item label="开发语言">Vue 3 + Spring Boot 3</el-descriptions-item>
           <el-descriptions-item label="官方网站">
-            <a href="https://www.xxgkami.com" target="_blank" class="link">www.xxgkami.com</a>
+            <a href="https://www.xxgkami.com/" target="_blank" class="link">https://www.xxgkami.com/</a>
           </el-descriptions-item>
         </el-descriptions>
       </el-card>
@@ -81,7 +88,86 @@
           </a>
         </div>
       </el-card>
+
+      <el-card class="info-card prank-card">
+        <template #header>
+          <div class="card-header">
+            <span>千万不要点</span>
+          </div>
+        </template>
+        <div class="prank-content">
+          <button type="button" class="prank-btn" @click="onPrankClick">
+            千万不要点
+          </button>
+        </div>
+      </el-card>
+
+      <el-card class="info-card supporters-card">
+        <template #header>
+          <div class="card-header supporters-card-header">
+            <span>共创使用者</span>
+            <a
+              :href="BUG_REPORT_FORM_URL"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="bug-report-btn"
+            >
+              提交 Bug
+            </a>
+          </div>
+        </template>
+        <div class="supporters-content">
+          <p class="supporters-desc">
+            感谢以下提交有效反馈的共创使用者（提交者自动收录，每人仅展示一次，按贡献次数排序）。
+            发现 Bug 可点击右上角「提交 Bug」填写
+            <a :href="BUG_REPORT_FORM_URL" target="_blank" rel="noopener noreferrer" class="supporters-form-link">小小怪卡密系统 Bug 收集表</a>。
+          </p>
+          <ol class="supporters-list">
+            <li v-for="(item, index) in topSupporters" :key="item.name" class="supporter-item">
+              <span class="supporter-rank">{{ index + 1 }}</span>
+              <span class="supporter-name">{{ item.name }}</span>
+              <span class="supporter-count">{{ item.count }} 次</span>
+            </li>
+          </ol>
+          <div class="supporters-actions">
+            <a
+              :href="BUG_REPORT_FORM_URL"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="bug-report-btn bug-report-btn-block"
+            >
+              提交 Bug 反馈
+            </a>
+            <button
+              v-if="feedbackSupporters.length > 3"
+              type="button"
+              class="supporters-more-btn"
+              @click="showSupportersDialog = true"
+            >
+              查看完整名单（共 {{ feedbackSupporters.length }} 人）
+            </button>
+          </div>
+        </div>
+      </el-card>
     </div>
+
+    <el-dialog
+      v-model="showSupportersDialog"
+      class="supporters-dialog"
+      title="共创使用者完整名单"
+      width="520px"
+      align-center
+      destroy-on-close
+    >
+      <p class="supporters-dialog-desc">按贡献次数排序，每人仅展示一次</p>
+      <ol class="supporters-list supporters-list-dialog">
+        <li v-for="(item, index) in feedbackSupporters" :key="item.name" class="supporter-item">
+          <span class="supporter-rank">{{ index + 1 }}</span>
+          <span class="supporter-name">{{ item.name }}</span>
+          <span class="supporter-count">{{ item.count }} 次</span>
+        </li>
+      </ol>
+    </el-dialog>
 
     <!-- 更新时间轴 -->
     <div class="timeline-section">
@@ -92,7 +178,39 @@
           </div>
         </template>
         <el-timeline>
-          <el-timeline-item timestamp="2026-06-04" placement="top" type="primary" size="large">
+          <el-timeline-item timestamp="2026-07-04" placement="top" type="primary" size="large">
+            <el-card>
+              <h4>v1.0.8 版本更新</h4>
+              <p>1. 新增自助解绑「原设备解绑」：开启后解绑须传入与原绑定一致的设备码；支持解绑冷却间隔与解绑次数上限（每张卡可单独配置）</p>
+              <p>2. 新增多管理员与权限管理：超级管理员可添加子管理员并分配功能权限；导航与页面按权限显隐</p>
+              <p>3. 新增操作日志：记录登录、卡密操作、管理员变更等，管理后台可分页查询</p>
+              <p>4. 新增卡密 Excel 导入：支持下载示例模板，可指定类型、时长或次数批量导入</p>
+              <p>5. 时间卡密新增「永久卡密」选项，列表与详情显示为「永久」</p>
+              <p>6. 美化添加管理员页面 UI，优化权限选择交互样式</p>
+              <p>7. 新增「API 开放中心」独立页面：接口文档从 API 管理页迁出，各板块独立分页展示（非锚点翻页）</p>
+              <p>8. API 开放中心文档中文化；新增 activate（开通授权）、unbind_device（解绑设备）、create_cards、create_api_key、health/ping 等开放平台接口文档与多语言示例</p>
+              <p>9. 新增开放平台 Token：API 开放中心可创建 Token（明文仅展示一次、可复制）；服务端仅存 SHA-256 哈希；每人最多 5 个，删除后立即失效</p>
+              <p>10. create_cards、create_api_key 接口改为须携带开放平台 Token（Authorization / X-Open-Token / open_token 参数）</p>
+              <p>11. 概览页顶部新增服务器物理位置：自动探测公网/内网 IP，支持国内（太平洋 IP 库）与国外（ipwho.is）双源查询；各区域独立异步加载互不阻塞</p>
+              <p>12. 系统信息页新增「共创使用者」名单：按 Bug 反馈贡献次数排序，默认展示前三，点击可查看完整弹窗名单</p>
+              <p>13. 新增 Electron 桌面版：支持 build:electron:safe 打包为 Windows NSIS 安装程序（XXG-KAMI-PRO-Setup-x.x.x.exe）</p>
+              <p>14. Electron 内置前端 dist 与后端 JAR（resources/runtime），无需从 Git 拉取即可离线运行</p>
+              <p>15. Electron 启动流程：首次不自动启动服务；先检测 Java 20+ 与 MySQL 8.0+，通过后点击「下一步」再启动前后端</p>
+              <p>16. Electron 环境页新增 MySQL 连接配置与在线检测（密码失焦自动测试），配置持久化到用户数据目录</p>
+              <p>17. Electron 启动进度弹窗：分步展示 HTML 前端加载、Java 后端启动、API 健康检查，附带日志与命令输出</p>
+              <p>18. Electron 8080 端口冲突检测：显示占用进程 PID，支持「一键清除并重新启动」；修复终端与程序重复启动导致的端口占用</p>
+              <p>19. Electron 前端改为 HTTP 静态服务（127.0.0.1:5174），便于云桌面端口映射与公网访问</p>
+              <p>20. Electron 前端在独立 CMD 终端启动（标题 XXG-KAMI Frontend），与后端终端并列显示日志</p>
+              <p>21. Electron 安装包使用自定义 icon.ico；build:electron:safe 输出至 xxgkami-electron-release 目录</p>
+              <p>22. Electron 首次配置完成后写入标记文件，再次启动跳过环境检测页并静默拉起后端</p>
+              <p>23. 新增开放平台全局 AES-256-CBC 加解密：入参/出参独立开关，可单独启用或组合使用</p>
+              <p>24. 入参加密：业务参数 JSON 加密后放入 encrypted_payload；出参加密：响应包装为 response_encrypted + encrypted_payload</p>
+              <p>25. API 开放中心新增「参数加密」配置：展示 Key/IV/算法规范，美化双开关 UI，并提供 JS/Java/Python 加解密对接文档</p>
+              <p>26. 修复 Electron 桌面版「检查更新」Failed to fetch；新增 electron/npm 国内镜像加速打包</p>
+              <p>27. 桌面版启动顺序优化：后端就绪后再确认前端 HTTP；8080 端口检测改用 netstat/tasklist/taskkill</p>
+            </el-card>
+          </el-timeline-item>
+          <el-timeline-item timestamp="2026-06-04" placement="top" size="large">
             <el-card>
               <h4>v1.0.7 版本更新</h4>
               <p>1. 新增在线更新：系统信息页可一键更新；自动探测后端 JAR 与前端 dist 路径，支持手动修改确认后下载 Release 制品并替换，完成后自动重启后端</p>
@@ -413,13 +531,24 @@
 </template>
 
 <script setup>
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { copyToClipboard } from '../utils/clipboard.js'
 import { monitorApi } from '../services/api.js'
+import { getFeedbackSupporters } from '../data/feedbackSupporters.js'
+import { useElectronDesktopUpdate } from '../composables/useElectronDesktopUpdate.js'
 import brandLogo from '../assets/icon.png'
 
-const currentVersion = 'v1.0.7'
+const currentVersion = 'v1.0.8'
+const isDesktop = ref(!!window.electronAPI?.isDesktop)
+const desktopVersion = ref('1.0.0')
+const bundledAppVersion = ref('1.0.8')
+const { checkForUpdate: checkDesktopUpdate } = useElectronDesktopUpdate()
+const BUG_REPORT_FORM_URL = 'https://docs.qq.com/form/page/DRUFmT29vUGd1QnRR'
+const feedbackSupporters = getFeedbackSupporters()
+const topSupporters = computed(() => feedbackSupporters.slice(0, 3))
+const showSupportersDialog = ref(false)
+
 const checking = ref(false)
 const showUpdateDialog = ref(false)
 const updateInfo = ref(null)
@@ -447,6 +576,17 @@ const onlineUpdateStatus = ref(null)
 const BAOTA_RESTART_HINT =
   '若刷新后仍无法访问，可能因宝塔权限导致后端未能自动启动，请前往：宝塔 → 网站 → Java 项目，手动启动后端 JAR 文件。'
 let statusPollTimer = null
+
+const loadDesktopVersion = async () => {
+  if (!window.electronAPI?.getDesktopVersion) return
+  try {
+    const info = await window.electronAPI.getDesktopVersion()
+    if (info?.desktopVersion) desktopVersion.value = info.desktopVersion
+    if (info?.bundledAppVersion) bundledAppVersion.value = info.bundledAppVersion
+  } catch {
+    // ignore
+  }
+}
 
 const changelogItems = computed(() => {
   const list = updateInfo.value?.changelog
@@ -613,6 +753,11 @@ const checkUpdate = async () => {
   checking.value = true
   hasNewerVersion.value = false
   try {
+    if (isDesktop.value) {
+      await checkDesktopUpdate({ force: true, silent: false })
+      return
+    }
+
     const { data, channel } = await monitorApi.checkUpdate()
     const remoteVersion = data.version
     const local = currentVersion.replace(/^v/i, '')
@@ -638,13 +783,29 @@ const checkUpdate = async () => {
   }
 }
 
-onUnmounted(() => stopStatusPoll())
+onMounted(() => {
+  loadDesktopVersion()
+})
+
+onUnmounted(() => {
+  stopStatusPoll()
+})
 
 const goToRepo = () => {
-  if (updateInfo.value && updateInfo.value.repoUrl) {
-    window.open(updateInfo.value.repoUrl, '_blank')
+  const url = updateInfo.value?.releasesUrl || updateInfo.value?.repoUrl
+  if (url) {
+    if (isDesktop.value && window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal(url)
+    } else {
+      window.open(url, '_blank')
+    }
     showUpdateDialog.value = false
   }
+}
+
+/** 恶搞彩蛋入口（预留，后期在此扩展） */
+const onPrankClick = () => {
+  // TODO: 在此增加恶搞逻辑
 }
 </script>
 
@@ -691,6 +852,195 @@ const goToRepo = () => {
 
 .sponsor-btn {
   text-decoration: none;
+}
+
+.prank-card {
+  border-color: #fca5a5;
+  display: flex;
+  flex-direction: column;
+}
+
+.prank-card :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.prank-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.prank-btn {
+  margin-top: 0;
+  padding: 10px 28px;
+  border: 2px solid #ef4444;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%);
+  color: #b91c1c;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+}
+
+.prank-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+  background: linear-gradient(180deg, #fee2e2 0%, #fecaca 100%);
+}
+
+.prank-btn:active {
+  transform: translateY(0);
+}
+
+.supporters-card {
+  grid-column: 1 / -1;
+}
+
+.supporters-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bug-report-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  background: #0369a1;
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+  line-height: 1.4;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.bug-report-btn:hover {
+  background: #0284c7;
+  color: #fff;
+}
+
+.bug-report-btn-block {
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+}
+
+.supporters-form-link {
+  color: #0369a1;
+  text-decoration: none;
+}
+
+.supporters-form-link:hover {
+  text-decoration: underline;
+}
+
+.supporters-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.supporters-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.supporters-desc {
+  margin: 0;
+  color: #909399;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.supporters-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.supporter-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.supporter-rank {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.supporter-name {
+  flex: 1;
+  color: #1e293b;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.supporter-count {
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.supporters-more-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #0369a1;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.supporters-more-btn:hover {
+  color: #0284c7;
+  text-decoration: underline;
+}
+
+.supporters-dialog-desc {
+  margin: 0 0 12px;
+  color: #909399;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.supporters-list-dialog {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+:deep(.supporters-dialog .el-dialog__body) {
+  padding-top: 8px;
 }
 
 .info-content {
@@ -742,6 +1092,46 @@ const goToRepo = () => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.version-sub {
+  color: #909399;
+  font-size: 13px;
+}
+
+.electron-download-progress {
+  margin-top: 16px;
+}
+
+.electron-install-mode {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f8f9fc;
+  border: 1px solid #ebeef5;
+}
+
+.electron-install-mode-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.install-mode-hint {
+  display: block;
+  margin-top: 4px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.install-dir-hint {
+  margin: 10px 0 0;
+  color: #606266;
+  font-size: 12px;
+  word-break: break-all;
 }
 
 :deep(.update-dialog .el-dialog__header) {

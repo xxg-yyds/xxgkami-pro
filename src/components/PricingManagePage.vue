@@ -90,19 +90,27 @@
             </div>
             <div class="form-group">
               <label>{{ form.type === 'time' ? '时长(天)' : '次数' }}</label>
-              <input type="number" v-model="form.value" required min="1">
+              <input type="number" v-model.number="form.value" min="1" step="1" :disabled="saving">
             </div>
             <div class="form-group">
               <label>价格</label>
-              <input type="number" v-model="form.price" required min="0" step="0.01">
+              <input type="number" v-model.number="form.price" min="0.01" step="0.01" :disabled="saving">
             </div>
             <div class="form-group">
               <label>描述</label>
-              <input type="text" v-model="form.description" required placeholder="例如: 7天时间卡">
+              <input
+                type="text"
+                v-model.trim="form.description"
+                maxlength="100"
+                placeholder="例如: 7天时间卡"
+                :disabled="saving"
+              >
             </div>
             <div class="modal-actions">
-              <button type="button" class="btn-secondary" @click="closeModal">取消</button>
-              <button type="submit" class="btn-primary">保存</button>
+              <button type="button" class="btn-secondary" :disabled="saving" @click="closeModal">取消</button>
+              <button type="submit" class="btn-primary" :disabled="saving">
+                {{ saving ? '保存中...' : '保存' }}
+              </button>
             </div>
           </form>
         </div>
@@ -113,12 +121,14 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { pricingApi } from '../services/api.js'
 
 const timeCards = ref([])
 const countCards = ref([])
 const showModal = ref(false)
 const isEditing = ref(false)
+const saving = ref(false)
 const form = reactive({
   id: null,
   type: 'time',
@@ -161,42 +171,104 @@ const editPricing = (item) => {
 }
 
 const deletePricing = async (id) => {
-  if (!confirm('确定要删除这个定价吗？')) return
+  try {
+    await ElMessageBox.confirm('确定要删除这个定价吗？', '确认删除', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
   try {
     const res = await pricingApi.deletePricing(id)
     if (res.success) {
+      ElMessage.success('删除成功')
       fetchPricing()
     } else {
-      alert(res.message || '删除失败')
+      ElMessage.error(res.message || '删除失败')
     }
   } catch (error) {
     console.error('Failed to delete pricing:', error)
-    alert('删除失败')
+    ElMessage.error('删除失败')
   }
 }
 
 const closeModal = () => {
+  if (saving.value) return
   showModal.value = false
 }
 
+const validateForm = () => {
+  const value = Number(form.value)
+  const price = Number(form.price)
+  const description = (form.description || '').trim()
+
+  if (!Number.isInteger(value) || value < 1) {
+    ElMessage.warning(form.type === 'time' ? '时长须为大于 0 的整数天' : '次数须为大于 0 的整数')
+    return false
+  }
+  if (!Number.isFinite(price) || price <= 0) {
+    ElMessage.warning('价格须大于 0')
+    return false
+  }
+  if (!description) {
+    ElMessage.warning('请填写描述')
+    return false
+  }
+  if (description.length > 100) {
+    ElMessage.warning('描述不能超过 100 个字符')
+    return false
+  }
+
+  const list = form.type === 'time' ? timeCards.value : countCards.value
+  const duplicate = list.some(
+    (item) => item.value === value && (!isEditing.value || item.id !== form.id)
+  )
+  if (duplicate) {
+    ElMessage.warning(
+      form.type === 'time' ? '已存在相同天数的时间卡定价' : '已存在相同次数的次数卡定价'
+    )
+    return false
+  }
+
+  form.value = value
+  form.price = price
+  form.description = description
+  return true
+}
+
 const savePricing = async () => {
+  if (saving.value) return
+  if (!validateForm()) return
+
+  saving.value = true
   try {
+    const payload = {
+      type: form.type,
+      value: form.value,
+      price: form.price,
+      description: form.description
+    }
     let res
     if (isEditing.value) {
-      res = await pricingApi.updatePricing(form.id, form)
+      res = await pricingApi.updatePricing(form.id, payload)
     } else {
-      res = await pricingApi.addPricing(form)
+      res = await pricingApi.addPricing(payload)
     }
-    
+
     if (res.success) {
-      closeModal()
+      ElMessage.success(res.message || (isEditing.value ? '更新成功' : '添加成功'))
+      showModal.value = false
       fetchPricing()
     } else {
-      alert(res.message || '保存失败')
+      ElMessage.error(res.message || '保存失败')
     }
   } catch (error) {
     console.error('Failed to save pricing:', error)
-    alert('保存失败')
+    ElMessage.error(error.message || '保存失败')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -208,6 +280,19 @@ onMounted(() => {
 <style scoped>
 .pricing-manage-page {
   padding: 1rem;
+  color: var(--text-primary, #111827);
+}
+
+.section-header h2 {
+  color: var(--text-primary, #111827);
+  margin: 0;
+}
+
+.pricing-section h3 {
+  color: var(--text-primary, #111827);
+  margin: 0 0 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
 }
 
 .section-header {
@@ -218,10 +303,11 @@ onMounted(() => {
 }
 
 .table-container {
-  background: white;
+  background: var(--surface, #ffffff);
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   overflow: hidden;
+  border: 1px solid var(--border-color, #e5e7eb);
 }
 
 table {
@@ -232,13 +318,17 @@ table {
 th, td {
   padding: 1rem;
   text-align: left;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-color, #eee);
+}
+
+td {
+  color: var(--text-secondary, #374151);
 }
 
 th {
-  background: #f9fafb;
+  background: var(--surface-muted, #f9fafb);
   font-weight: 600;
-  color: #374151;
+  color: var(--text-secondary, #374151);
 }
 
 .action-buttons {
@@ -256,6 +346,12 @@ th {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-danger {
@@ -286,11 +382,17 @@ th {
 }
 
 .modal-content {
-  background: white;
+  background: var(--surface, #ffffff);
   border-radius: 8px;
   width: 100%;
   max-width: 500px;
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  color: var(--text-primary, #111827);
+}
+
+.modal-header h3 {
+  color: var(--text-primary, #111827);
+  margin: 0;
 }
 
 .modal-header {
@@ -320,6 +422,8 @@ th {
   padding: 0.5rem;
   border: 1px solid #d1d5db;
   border-radius: 4px;
+  background: var(--surface, #ffffff);
+  color: var(--text-primary, #111827);
 }
 
 .modal-actions {

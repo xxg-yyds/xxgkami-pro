@@ -808,7 +808,7 @@ const scrollToFeatures = () => {
   position: absolute;
   background: white;
   border: 1px solid #e5e7eb;
-  border-radius: 4px;
+  border-radius: var(--card-radius);
   padding: 1.25rem;
   width: 260px;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
@@ -969,7 +969,7 @@ const scrollToFeatures = () => {
   padding: 1.5rem;
   background: #f9fafb;
   border: 1px solid #e5e7eb;
-  border-radius: 4px;
+  border-radius: var(--card-radius);
   transition: all 0.2s ease;
   min-width: 100px;
 }
@@ -1046,7 +1046,7 @@ const scrollToFeatures = () => {
 .feature-item {
   padding: 2rem;
   background: white;
-  border-radius: 4px;
+  border-radius: var(--card-radius);
   border: 1px solid #e5e7eb;
   transition: all 0.2s ease;
 }

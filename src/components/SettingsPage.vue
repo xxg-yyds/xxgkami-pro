@@ -12,15 +12,10 @@
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
           <h3>基本设置</h3>
         </div>
+        <p class="basic-settings-notice">
+          项目完全开源，有能力的开发者可以克隆本项目进行高度自定义，发布版本为保留开源协议版权，暂不可修改系统的基本信息。
+        </p>
         <div class="settings-grid">
-          <div class="setting-item">
-            <label>系统名称</label>
-            <input type="text" v-model="settings.systemName" placeholder="请输入系统名称" />
-          </div>
-          <div class="setting-item">
-            <label>系统描述</label>
-            <textarea v-model="settings.systemDescription" rows="3" placeholder="请输入系统描述"></textarea>
-          </div>
           <div class="setting-item">
             <label>默认语言</label>
             <select v-model="settings.defaultLanguage">
@@ -452,8 +447,6 @@ const disableTotp = async () => {
 
 const settings = reactive({
   // 基本设置
-  systemName: 'XXG卡密系统',
-  systemDescription: '专业的卡密管理系统',
   defaultLanguage: 'zh-CN',
   timezone: 'Asia/Shanghai',
   site_url: '',
@@ -581,8 +574,6 @@ const resetSettings = () => {
   if (confirm('确定要重置所有设置吗？这将恢复到默认配置。')) {
     // 重置到默认值
     Object.assign(settings, {
-      systemName: 'XXG卡密系统',
-      systemDescription: '专业的卡密管理系统',
       defaultLanguage: 'zh-CN',
       timezone: 'Asia/Shanghai',
       autoBackup: true,
@@ -924,6 +915,17 @@ input:checked + .slider:before {
   .required {
     color: #f56c6c;
     margin-left: 4px;
+  }
+
+  .basic-settings-notice {
+    margin: 0 0 1rem;
+    padding: 0.75rem 1rem;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #475569;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 8px;
   }
   
   .help-text {
